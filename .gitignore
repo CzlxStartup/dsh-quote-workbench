@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Local package-manager cache
+.npm-cache/
+.pnpm-store/
+
+# Logs and local environment
+*.log
+npm-debug.log*
+.env
+.env.*
+!.env.example
+
+# Test and coverage output
+coverage/
+.nyc_output/
+
+# Editor and OS files
+.DS_Store
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.swp

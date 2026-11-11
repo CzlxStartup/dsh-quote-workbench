@@ -1,0 +1,4 @@
+- insert:
+    - id: quote-workbench
+      name: '@local/quote-workbench'
+      config: {}
