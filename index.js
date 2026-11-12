@@ -9,13 +9,14 @@ export async function apply(ctx) {
     factories: z.array(z.record(z.string(), z.unknown())),
     freights: z.array(z.record(z.string(), z.unknown())),
     history: z.array(z.record(z.string(), z.unknown())),
+    products: z.array(z.record(z.string(), z.unknown())).default([]),
     settings: z.object({ provider: z.string().min(1), model: z.string().min(1) }).nullable().default(null),
   }).superRefine((value, context) => {
     try { validateDatabase(value); } catch (error) { context.addIssue({ code: 'custom', message: error.message }); }
   });
   const domain = await ctx.storageDomain.open({
     name: 'quote_workbench', version: 1, tables: {},
-    global: { schema, initial: { revision: 0, factories: [], freights: [], history: [], settings: null } },
+    global: { schema, initial: { revision: 0, factories: [], freights: [], history: [], products: [], settings: null } },
   });
   ctx.effect(() => () => domain.close());
   const defaultSelection = () => {
@@ -43,16 +44,16 @@ export async function apply(ctx) {
   }));
   ctx.effect(() => ctx.tools.register({
     name: 'quote_workbench',
-    description: '管理报价工作台的工厂报价、货代报价及核算记录，或用大模型解析报价文本、计算利润、查询信保费率。schema 返回字段定义；list/export 返回全部记录及 revision；settings 返回当前解析模型；models 列出 Harness 可用模型。parse 使用设置中选择的模型。saveSettings 修改解析模型，provider 和 model 都省略表示跟随 Harness 默认模型。import 替换全部记录。写入前先读取记录，取得 revision。',
+    description: '管理报价工作台的工厂报价、货代报价、核算记录和产品目录，或用大模型解析报价文本、计算利润、查询信保费率。schema 返回字段定义；list/export 返回全部记录及 revision；settings 返回当前解析模型；models 列出 Harness 可用模型。parse 使用设置中选择的模型。saveSettings 修改解析模型，provider 和 model 都省略表示跟随 Harness 默认模型。import 替换全部记录。写入前先读取记录，取得 revision。',
     parameters: {
       type: 'object', required: ['action'], additionalProperties: false,
       properties: {
-        action: { type: 'string', enum: ['schema','list','export','parse','settings','models','saveSettings','credit','average','calculate','add','delete','import'] },
-        kind: { type: 'string', enum: ['factories','freights','history'], description: 'add/delete 的记录类型。' },
-        revision: { type: 'integer', description: 'add/delete/import/saveSettings 必填，使用最新 list 返回的 revision。' },
-        id: { type: 'string', description: 'delete 的记录 id。' },
-        record: { type: 'object', additionalProperties: true, description: 'add 的记录；字段见 schema。history 传 mode 和 values，结果由服务计算。' },
-        data: { type: 'object', additionalProperties: true, description: 'import 的完整备份，包含 factories、freights、history 数组；替换现有记录。' },
+        action: { type: 'string', enum: ['schema','list','export','parse','settings','models','saveSettings','credit','average','calculate','add','update','delete','import'] },
+        kind: { type: 'string', enum: ['factories','freights','history','products'], description: 'add/delete 的记录类型；update 仅支持 factories。' },
+        revision: { type: 'integer', description: 'add/update/delete/import/saveSettings 必填，使用最新 list 返回的 revision。' },
+        id: { type: 'string', description: 'update/delete 的记录 id。' },
+        record: { type: 'object', additionalProperties: true, description: 'add/update 的记录；字段见 schema。products 传 name 和 cas；工厂 update 保留 id 和 createdAt。history 传 mode 和 values，结果由服务计算；customerTerm 为对客条款，旧 term 不作为对客条款。' },
+        data: { type: 'object', additionalProperties: true, description: 'import 的完整备份，包含 factories、freights、history、products 数组；旧备份缺少 products 时默认为空；替换现有记录。' },
         mode: { type: 'string', enum: ['rmb','usd','own'], description: 'calculate 的核算模式。' },
         values: { type: 'object', additionalProperties: true, description: 'calculate 的数值，字段见 schema；RMB 需 seaMax 和 rebate。' },
         raw: { type: 'string', description: 'parse 的报价文本或从 Excel 复制的制表符表格。' },

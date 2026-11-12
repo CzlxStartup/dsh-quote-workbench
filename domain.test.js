@@ -98,6 +98,25 @@ test('record and backup validators throw Chinese errors and preserve legacy hist
   assert.throws(()=>d.validateDatabase({...db,history:{}}),/数组/);
   assert.throws(()=>d.validateRecord('unknown',{}),/未知/);
 });
+test('CAS catalog follows dist precedence, normalization and derived-entry rules',()=>{
+  const db={products:[{id:'manual',name:'手工名称',cas:'67-68-5'}],history:[{values:{product:'历史名称',cas:' 67–68–5 '}},{values:{product:'历史产品',cas:'64-17-5'}}],factories:[{name:'重复工厂产品',cas:'64-17-5'},{name:'工厂产品',cas:'7732-18-5'},{name:'无效',cas:'bad'}]};
+  const before=JSON.stringify(db);
+  assert.deepEqual(d.catalogProducts(db),[{id:'manual',name:'手工名称',cas:'67-68-5',manualIndex:0},{name:'历史产品',cas:'64-17-5'},{name:'工厂产品',cas:'7732-18-5'}]);
+  assert.equal(JSON.stringify(db),before);
+  assert.equal(d.normalizeCas(' 67<br>–68&nbsp;–5 '),'67-68-5');
+  assert.throws(()=>d.validateRecord('products',{name:'产品',cas:'bad'}),/CAS/);
+  assert.throws(()=>d.validateDatabase({factories:[],freights:[],history:[],products:{}}),/产品目录/);
+  assert.equal(d.defaults.customerTerm,'待确认');
+  assert.ok(!d.basic.some(([key])=>key==='term'));
+});
+test('rule extraction preserves CAS and quote dates from Excel headers',()=>{
+  for(const label of ['CAS','CAS 号','CAS号']) {
+    const [row]=d.parseQuotes(`产品\t报价明细\t${label}\t报价日期\t报价有效期\n产品甲\tUSD 20/kg\t67–68–5\t2026/1/2\t2026.12.31`);
+    assert.equal(row.cas,'67-68-5'); assert.equal(row.quoteDate,'2026-01-02'); assert.equal(row.validity,'2026-12-31');
+    assert.equal(row.price,20);
+  }
+  assert.equal(d.normalizeFactoryDate('月底'),'');
+});
 test('freight average requires a shared route, transport, basis and current validity',()=>{
   const rows=[freight(),freight({agent:'乙',sea:3000,local:700})];
   assert.deepEqual(d.averageFreights(rows,'2026-12-01'),{sea:2000,local:600,seaMin:1000,seaMax:3000,transportMode:'海运整柜'});

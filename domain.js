@@ -1,12 +1,12 @@
 // Pure business rules extracted from the original quotation workbench.
 // No DOM, storage, or runtime service dependencies.
 const transportModes=['海运整柜','海运拼箱','空运','铁路','公路','快递','其他'];
-const basic=[['transportMode','运输方式',['',...transportModes]],['product','产品 / 规格','text'],['customer','客户','text'],['quoteCountry','报价国家 / 地区',['']],['creditMonths','账期（月）','number'],['creditPayment','信保付款方式',['','L/C','D/P','D/A 或 O/A']],['qty','数量 kg','number'],['sell','对客单价 USD/kg','number'],['term','工厂 Incoterm',['待确认','EXW','FCA','FOB','CFR','CIF','其他']],['place','交货地点 / 港口','text']];
+const basic=[['cas','CAS 号','text'],['transportMode','运输方式',['',...transportModes]],['product','产品 / 规格','text'],['customer','客户','text'],['quoteCountry','报价国家 / 地区',['']],['creditMonths','账期（月）','number'],['creditPayment','信保付款方式',['','L/C','D/P','D/A 或 O/A']],['qty','数量 kg','number'],['sell','对客单价 USD/kg','number'],['customerTerm','Incoterm',['待确认','EXW','FCA','FOB','CFR','CIF','其他']],['place','交货地点 / 港口','text']];
 const costs=[['buy','工厂采购单价','number'],['fx','买汇 / 成本汇率 RMB/USD','number'],['receive','收汇汇率 RMB/USD','number'],['sea','国际运费 USD/票','number'],['local','国内费用总额 RMB/票','number'],['tax','增值税率 %','number'],['rebate','退税率 %','number']];
 const params=[['transport','运输保险费率 %','number'],['credit','信用保险费率 %','number'],['interest','年资金利率 %','number'],['months','资金占用月数','number']];
-const factoryFields=[['name','产品','text'],['factory','工厂','text'],['details','报价明细','text'],['quantity','数量','text'],['validity','报价有效期','text'],['price','报价单价','number'],['currency','币种',['USD','RMB']],['rebate','退税率 %（不退税填 0）','number'],['unit','计价单位',['待确认','吨','公斤']],['incoterm','Incoterm',['待确认','EXW','FCA','FOB','CFR','CIF','其他']],['port','交货地点','text'],['loading','装柜量 / 柜型','text'],['packing','包装方式','text'],['delivery','交货期（含年份）','text'],['warehouse','进仓费承担方',['我方','工厂']],['portfee','港杂费承担方',['我方','工厂']]];
+const factoryFields=[['cas','CAS 号','text'],['quoteDate','报价日期','date'],['name','产品','text'],['factory','工厂','text'],['details','报价明细','text'],['quantity','数量','text'],['validity','报价有效期','date'],['price','报价单价','number'],['currency','币种',['USD','RMB']],['rebate','退税率 %（不退税填 0）','number'],['unit','计价单位',['待确认','吨','公斤']],['incoterm','Incoterm',['待确认','EXW','FCA','FOB','CFR','CIF','其他']],['port','交货地点','text'],['loading','装柜量 / 柜型','text'],['packing','包装方式','text'],['delivery','交货期（含年份）','text'],['warehouse','进仓费承担方',['我方','工厂']],['portfee','港杂费承担方',['我方','工厂']]];
 const freightFields=[['agent','货代名称','text'],['route','路线（起运地 → 目的地）','text'],['transportMode','运输方式',['海运整柜','海运拼箱','空运']],['basis','数量 / 柜型 / 费用范围','text'],['valid','有效期','date'],['sea','国际运费 USD/票','number'],['local','国内费用 RMB/票','number']];
-const defaults={product:'',customer:'',qty:null,sell:null,term:'待确认',place:'',buy:null,fx:6.75,receive:6.75,sea:null,local:null,tax:13,rebate:null,transport:.03,credit:null,interest:3.6,months:3};
+const defaults={product:'',cas:'',customer:'',qty:null,sell:null,customerTerm:'待确认',place:'',buy:null,fx:6.75,receive:6.75,sea:null,local:null,tax:13,rebate:null,transport:.03,credit:null,interest:3.6,months:3};
 function validRebate(rate){return Number.isFinite(rate)&&rate>=0&&rate<=100;}
 function fcaCost(v){return (v.buy-v.buy/(1+v.tax/100)*(v.rebate/100))/v.fx;}
 function calculate(v,m){const revenue=v.qty*v.sell,insurance=revenue*1.1*v.transport/100,credit=revenue*v.credit/100,interest=revenue*v.interest/100/12*v.months;if(m==='own'){const unit=v.sell-insurance/v.qty-credit/v.qty-interest/v.qty-v.sea/v.qty-v.local/v.qty/v.fx;return{unit,rmb:unit*(1+v.tax/100)*v.fx,insurance,credit,interest}}const base=m==='rmb'?fcaCost(v):v.buy+v.local/v.fx/v.qty;const landed=base+v.sea/v.qty+(m==='rmb'?v.local/v.fx/v.qty:0);const profit=revenue-insurance-credit-interest-landed*v.qty;return{base,landed,profit,margin:base?v.qty?profit/(base*v.qty):0:0,rmb:revenue*v.receive-(insurance+credit+interest)*v.fx-landed*v.fx*v.qty,insurance,credit,interest}}
@@ -50,6 +50,24 @@ function lookupCreditRate(country, months, payment) {
  return rate===undefined ? null : {rate, group, period:creditPeriods[index][1]};
 }
 
+function normalizeCas(value) {
+  return String(value ?? '').replace(/<br\s*\/?>|&nbsp;|&#x20;/gi, ' ').trim().replace(/[‐‑–—－]/g, '-').replace(/\s+/g, '');
+}
+function normalizeFactoryDate(value) {
+  const match = String(value ?? '').trim().match(/^(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})$/);
+  return match ? `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}` : '';
+}
+function catalogProducts(db) {
+  const products = (db.products ?? []).map((product, manualIndex) => ({ ...product, manualIndex }));
+  const known = new Set(products.map(product => normalizeCas(product.cas)));
+  const saved = [...(db.history ?? []).map(record => record.values), ...(db.factories ?? []).map(quote => ({ product: quote.name, cas: quote.cas }))];
+  for (const values of saved) {
+    const cas = normalizeCas(values?.cas), name = values?.product?.trim();
+    if (!name || !/^\d{2,7}-\d{2}-\d$/.test(cas) || known.has(cas)) continue;
+    products.push({ name, cas }); known.add(cas);
+  }
+  return products;
+}
 const nonnegative = n => Number.isFinite(n) && n >= 0;
 const positive = n => Number.isFinite(n) && n > 0;
 const text = s => typeof s === 'string' && s.trim().length > 0;
@@ -73,7 +91,9 @@ function validDate(s) {
 /** Return the same record or throw an Error with a Chinese explanation. */
 function validateRecord(kind, r) {
   if (!object(r)) throw new Error('记录必须是有效对象。');
-  if (kind === 'factories') {
+  if (kind === 'products') {
+    if (!text(r.name) || typeof r.cas !== 'string' || !/^\d{2,7}-\d{2}-\d$/.test(normalizeCas(r.cas))) throw new Error('请填写产品名称和 CAS 号，格式如 67-68-5。');
+  } else if (kind === 'factories') {
     if (!text(r.name) || !positive(r.price)) throw new Error('工厂报价须填写产品名称和有效正数价格。');
     if (!['RMB','USD'].includes(r.currency) || !['吨','公斤'].includes(r.unit)) throw new Error('工厂报价须确认币种和计价单位。');
     if ((r.currency === 'RMB' || r.rebate != null) && !validRebate(r.rebate)) throw new Error('请填写 0–100 的退税率，不退税填 0。');
@@ -103,6 +123,13 @@ function validateDatabase(data) {
     data[kind].forEach((r,i) => {
       try { validateRecord(kind,r); }
       catch (e) { throw new Error(`${({factories:'工厂报价',freights:'货代报价',history:'核算记录'})[kind]}第 ${i+1} 条：${e.message}`); }
+    });
+  }
+  if (data.products !== undefined) {
+    if (!Array.isArray(data.products)) throw new Error('产品目录须为数组。');
+    data.products.forEach((r, i) => {
+      try { validateRecord('products', r); }
+      catch (e) { throw new Error(`产品目录第 ${i + 1} 条：${e.message}`); }
     });
   }
   return data;
@@ -164,10 +191,12 @@ function parseQuotes(raw) {
   if (typeof raw !== 'string' || !raw.trim()) return [];
   const rows=quoteRows(raw), header=(rows[0]||[]).map(s=>s.replace(/^\uFEFF/,'').trim());
   if (!header.includes('产品') || !header.includes('报价明细')) return [parseQuote(raw)];
-  const keys={'产品':'name','工厂':'factory','报价明细':'details','数量':'quantity','报价有效期':'validity','交货期':'delivery'};
+  const keys={'产品':'name','工厂':'factory','报价明细':'details','数量':'quantity','CAS':'cas','CAS 号':'cas','CAS号':'cas','报价日期':'quoteDate','报价有效期':'validity','交货期':'delivery'};
   return rows.slice(1).map(row=>{
     const explicit=Object.fromEntries(header.flatMap((key,i)=>keys[key]?[[keys[key],row[i]||'']]:[]));
-    return {...parseQuote(explicit.details),...explicit};
+    return {...parseQuote(explicit.details),...explicit,
+      cas:normalizeCas(explicit.cas), quoteDate:normalizeFactoryDate(explicit.quoteDate),
+      validity:normalizeFactoryDate(explicit.validity)};
   });
 }
-export {basic,costs,params,factoryFields,freightFields,defaults,samples,transportModes,creditCountries,lookupCreditRate,calculate,fcaCost,validRebate,validateCalculation,parseQuotes,validateRecord,validateDatabase,averageFreights};
+export {normalizeCas,normalizeFactoryDate,catalogProducts,basic,costs,params,factoryFields,freightFields,defaults,samples,transportModes,creditCountries,lookupCreditRate,calculate,fcaCost,validRebate,validateCalculation,parseQuotes,validateRecord,validateDatabase,averageFreights};

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { basic, costs, params, factoryFields, freightFields, validateDatabase, validateRecord, validateCalculation, calculate, lookupCreditRate, averageFreights } from './domain.js';
+import { basic, costs, params, factoryFields, freightFields, validateDatabase, validateRecord, validateCalculation, calculate, lookupCreditRate, averageFreights, normalizeCas, normalizeFactoryDate, catalogProducts } from './domain.js';
 
 const INCOTERMS = ['EXW', 'FCA', 'FOB', 'CFR', 'CIF'];
 const SESSION_ID = `dsh-quote-workbench-${randomUUID()}`;
@@ -8,6 +8,8 @@ const SYSTEM_PROMPT = `你是报价工作台的报价提取器。用户会粘贴
 
 每条记录的字段：
 - name：产品 / 规格（含含量、包装等关键描述）；没有就留空字符串
+- cas：CAS 号，仅提取原文明确给出的编号，格式如 67-68-5；没有留空，不要根据产品名称推测
+- quoteDate：报价日期，尽量规范为 YYYY-MM-DD；没有留空，不要用当前日期补填
 - factory：工厂名称；没有留空
 - details：这一条报价的完整原文明细，保留原文
 - quantity：数量口径（如 22t/20GP、1000kg）；没有留空
@@ -85,6 +87,8 @@ export function sanitizeQuoteRecords(output, raw) {
     const incotermText = plainText(row.incoterm, 10).toUpperCase();
     return {
       name: plainText(row.name),
+      cas: normalizeCas(plainText(row.cas)),
+      quoteDate: normalizeFactoryDate(plainText(row.quoteDate, 100)),
       factory: plainText(row.factory),
       details,
       quantity: plainText(row.quantity),
@@ -114,7 +118,7 @@ export class QuoteWorkbench {
   }
   async execute(input, signal) {
     if (!input || typeof input !== 'object') throw Error('操作参数必须是对象');
-    const write = ['add', 'delete', 'import', 'saveSettings'].includes(input.action);
+    const write = ['add', 'update', 'delete', 'import', 'saveSettings'].includes(input.action);
     if (!write) return this.perform(input, signal);
     const task = this.tail.then(() => this.perform(input, signal));
     this.tail = task.catch(() => {});
@@ -182,7 +186,8 @@ export class QuoteWorkbench {
     const stored = this.storage.get();
     const db = structuredClone(stored);
     if (db.settings === undefined) db.settings = null;
-    if (action === 'schema') return { basic, costs, params, factoryFields, freightFields, modes: ['rmb', 'usd', 'own'] };
+    if (db.products === undefined) db.products = [];
+    if (action === 'schema') return { basic, costs, params, factoryFields, freightFields, productFields: [['name', '产品名称', 'text'], ['cas', 'CAS 号', 'text']], modes: ['rmb', 'usd', 'own'] };
     if (action === 'list' || action === 'export') return db;
     if (action === 'settings') return { settings: db.settings, revision: db.revision, effective: this.effective(db.settings) };
     if (action === 'models') return this.listModels(db.settings);
@@ -193,7 +198,7 @@ export class QuoteWorkbench {
       if (!validateCalculation(input.values, input.mode)) throw Error('核算数据不完整或超出有效范围');
       return { result: calculate(input.values, input.mode), highFreightResult: input.mode === 'rmb' ? calculate({ ...input.values, sea: input.values.seaMax }, input.mode) : null };
     }
-    if (!['add', 'delete', 'import', 'saveSettings'].includes(action)) throw Error('未知操作');
+    if (!['add', 'update', 'delete', 'import', 'saveSettings'].includes(action)) throw Error('未知操作');
     if (input.revision !== stored.revision) throw Error('记录已更新，请刷新后重试，避免覆盖其他窗口的修改');
     if (action === 'saveSettings') {
       const settings = input.settings == null ? null : {
@@ -213,10 +218,22 @@ export class QuoteWorkbench {
     }
     if (action === 'import') {
       validateDatabase(input.data);
-      for (const key of ['factories', 'freights', 'history']) db[key] = input.data[key].map(row => ({ ...row, id: randomUUID() }));
+      for (const key of ['factories', 'freights', 'history', 'products']) db[key] = (input.data[key] ?? []).map(row => ({ ...row, id: randomUUID() }));
     } else {
-      if (!['factories', 'freights', 'history'].includes(input.kind)) throw Error('请选择有效记录类型');
-      if (action === 'delete') {
+      if (!['factories', 'freights', 'history', 'products'].includes(input.kind)) throw Error('请选择有效记录类型');
+      if (action === 'update') {
+        if (input.kind !== 'factories') throw Error('仅支持更新工厂报价');
+        const index = db.factories.findIndex(row => row.id === input.id);
+        if (index < 0) throw Error('记录不存在，请刷新');
+        if (!input.record || typeof input.record !== 'object' || Array.isArray(input.record)) throw Error('记录必须是有效对象。');
+        const previous = db.factories[index];
+        const next = { ...previous, ...structuredClone(input.record), id: previous.id, updatedAt: new Date().toISOString() };
+        if (previous.createdAt === undefined) delete next.createdAt;
+        else next.createdAt = previous.createdAt;
+        if (next.cas !== undefined) next.cas = normalizeCas(next.cas);
+        validateRecord('factories', next);
+        db.factories[index] = next;
+      } else if (action === 'delete') {
         const index = db[input.kind].findIndex(row => row.id === input.id);
         if (index < 0) throw Error('记录不存在，请刷新');
         db[input.kind].splice(index, 1);
@@ -226,8 +243,19 @@ export class QuoteWorkbench {
           if (!validateCalculation(next?.values, next?.mode)) throw Error('核算数据不完整或超出有效范围');
           next = { ...next, result: calculate(next.values, next.mode), highFreightResult: next.mode === 'rmb' ? calculate({ ...next.values, sea: next.values.seaMax }, next.mode) : null, date: new Date().toISOString() };
         }
+        if (input.kind === 'products' && next && typeof next === 'object' && !Array.isArray(next)) {
+          next = { name: typeof next.name === 'string' ? next.name.trim() : next.name, cas: normalizeCas(next.cas) };
+        }
         validateRecord(input.kind, next);
-        db[input.kind].unshift({ ...next, id: randomUUID() });
+        if (input.kind === 'products' && catalogProducts(db).some(product => normalizeCas(product.cas) === next.cas)) throw Error('该 CAS 号已在目录中。');
+        if (input.kind === 'factories') {
+          next.createdAt = new Date().toISOString();
+          delete next.updatedAt;
+          if (next.cas !== undefined) next.cas = normalizeCas(next.cas);
+        }
+        const saved = { ...next, id: randomUUID() };
+        if (input.kind === 'products') db.products.push(saved);
+        else db[input.kind].unshift(saved);
       }
     }
     db.revision++;
