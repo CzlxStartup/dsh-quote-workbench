@@ -24,3 +24,11 @@ coverage/
 # Temporary files
 *.tmp
 *.swp
+.tmp/
+
+# Local sourcing data exports, reports and scratch analysis (never published)
+sourcing-*.json
+sourcing-*.md
+cb_hits*.json
+cb_scan*.py
+__pycache__/

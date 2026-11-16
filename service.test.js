@@ -28,7 +28,18 @@ test('saved history is recomputed and read-only actions do not change revision',
   const preview = await service.execute({ action: 'calculate', mode: 'rmb', values });
   const db = await service.execute({ action: 'add', kind: 'history', revision: 0, record: { mode: 'rmb', values, result: { profit: 1e9 } } });
   assert.deepEqual(db.history[0].result, preview.result); assert.deepEqual(db.history[0].highFreightResult, preview.highFreightResult);
-  assert.equal((await service.execute({ action: 'export' })).revision, 1);
+  const usdValues = { ...defaults, ...samples.usd, seaMax: 3500, credit: 0.441 };
+  const usdPreview = await service.execute({ action: 'calculate', mode: 'usd', values: usdValues });
+  assert.ok(usdPreview.highFreightResult);
+  const next = await service.execute({ action: 'add', kind: 'history', revision: 1, record: { mode: 'usd', values: usdValues } });
+  assert.deepEqual(next.history[0].result, usdPreview.result); assert.deepEqual(next.history[0].highFreightResult, usdPreview.highFreightResult);
+  const ownValues = { ...defaults, ...samples.own, seaMax: 300 };
+  const ownPreview = await service.execute({ action: 'calculate', mode: 'own', values: ownValues });
+  assert.ok(ownPreview.highFreightResult, 'own-factory reverse mode keeps a max-freight result');
+  const ownNext = await service.execute({ action: 'add', kind: 'history', revision: 2, record: { mode: 'own', values: ownValues } });
+  assert.deepEqual(ownNext.history[0].result, ownPreview.result);
+  assert.deepEqual(ownNext.history[0].highFreightResult, ownPreview.highFreightResult);
+  assert.equal((await service.execute({ action: 'export' })).revision, 3);
 });
 test('persistence failure returns an error without claiming a successful change', async () => {
   const data = { revision: 0, factories: [], freights: [], history: [] };
@@ -86,12 +97,13 @@ test('saving settings validates the provider and persists the selection', async 
   assert.equal(fallback.settings, null);
 });
 test('sanitizer drops unknown fields, tolerates summaries and keeps multiple quotes', async () => {
-  const records = sanitizeQuoteRecords('说明文字\n[{"name":"A","price":2.5,"unit":"公斤","extra":"drop"},{"name":"B","price":null,"rebate":"13"}]\n结束', '原文');
+  const records = sanitizeQuoteRecords('说明文字\n[{"name":"A","price":2.5,"unit":"公斤","extra":"drop"},{"name":"B","price":null,"rebate":"13","tax":"9"}]\n结束', '原文');
   assert.equal(records.length, 2);
   assert.equal('extra' in records[0], false);
   assert.equal(records[0].raw, '原文');
   assert.equal(records[1].price, null);
   assert.equal(records[1].rebate, 13);
+  assert.equal(records[1].tax, 9);
   assert.throws(() => sanitizeQuoteRecords('没有 JSON', '原文'), /没有返回/);
 });
 test('model failures surface the provider message', async () => {
@@ -194,6 +206,7 @@ test('AI prompt requests CAS and quote date and sanitizes them without losing va
   const service = new QuoteWorkbench({ get: () => ({ revision: 0, factories: [], freights: [], history: [] }) }, llm, () => ({ provider: 'test-provider', model: 'test-model' }));
   const parsed = await service.execute({ action: 'parse', raw: 'DMSO CAS 67-68-5 报价日期2026年11月12日' });
   assert.match(prompt, /cas：CAS/);
+  assert.match(prompt, /tax：增值税率/);
   assert.match(prompt, /quoteDate：报价日期/);
   assert.equal(parsed.records[0].cas, '67-68-5');
   assert.equal(parsed.records[0].quoteDate, '2026-11-12');

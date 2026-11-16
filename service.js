@@ -16,6 +16,7 @@ const SYSTEM_PROMPT = `你是报价工作台的报价提取器。用户会粘贴
 - validity：报价有效期；没有留空
 - price：报价单价，纯数字；有多个价格、价格区间或标题行时填 null
 - currency："USD" 或 "RMB"
+- tax：增值税率百分数 0–100；明确写了增值税率才填；未提到填 null
 - rebate：退税率百分数 0–100；明确不退税填 0；未提到填 null
 - unit："吨" 或 "公斤"；无法判断填 "待确认"
 - incoterm："EXW"、"FCA"、"FOB"、"CFR"、"CIF"、"其他" 或 "待确认"
@@ -82,6 +83,7 @@ export function sanitizeQuoteRecords(output, raw) {
   return list.filter(row => row && typeof row === 'object' && !Array.isArray(row)).map(row => {
     const details = plainText(row.details ?? row.raw, 4000) || raw;
     const price = noteNumber(row.price);
+    const tax = noteNumber(row.tax);
     const rebate = noteNumber(row.rebate);
     const currencyText = plainText(row.currency, 10).toUpperCase();
     const incotermText = plainText(row.incoterm, 10).toUpperCase();
@@ -95,6 +97,7 @@ export function sanitizeQuoteRecords(output, raw) {
       validity: plainText(row.validity),
       price: price !== null && price > 0 ? price : null,
       currency: currencyText === 'USD' || currencyText === 'RMB' ? currencyText : detectCurrency(details),
+      tax: tax !== null && tax >= 0 && tax <= 100 ? tax : null,
       rebate: rebate !== null && rebate >= 0 && rebate <= 100 ? rebate : null,
       unit: ['吨', '公斤'].includes(row.unit) ? row.unit : detectUnit(details),
       incoterm: INCOTERMS.includes(incotermText) ? incotermText : /其他/.test(plainText(row.incoterm, 10)) ? '其他' : '待确认',
@@ -196,7 +199,7 @@ export class QuoteWorkbench {
     if (action === 'average') return { result: averageFreights(input.rows, input.today) };
     if (action === 'calculate') {
       if (!validateCalculation(input.values, input.mode)) throw Error('核算数据不完整或超出有效范围');
-      return { result: calculate(input.values, input.mode), highFreightResult: input.mode === 'rmb' ? calculate({ ...input.values, sea: input.values.seaMax }, input.mode) : null };
+      return { result: calculate(input.values, input.mode), highFreightResult: calculate({ ...input.values, sea: input.values.seaMax }, input.mode) };
     }
     if (!['add', 'update', 'delete', 'import', 'saveSettings'].includes(action)) throw Error('未知操作');
     if (input.revision !== stored.revision) throw Error('记录已更新，请刷新后重试，避免覆盖其他窗口的修改');
@@ -241,7 +244,7 @@ export class QuoteWorkbench {
         let next = structuredClone(input.record);
         if (input.kind === 'history') {
           if (!validateCalculation(next?.values, next?.mode)) throw Error('核算数据不完整或超出有效范围');
-          next = { ...next, result: calculate(next.values, next.mode), highFreightResult: next.mode === 'rmb' ? calculate({ ...next.values, sea: next.values.seaMax }, next.mode) : null, date: new Date().toISOString() };
+          next = { ...next, result: calculate(next.values, next.mode), highFreightResult: calculate({ ...next.values, sea: next.values.seaMax }, next.mode), date: new Date().toISOString() };
         }
         if (input.kind === 'products' && next && typeof next === 'object' && !Array.isArray(next)) {
           next = { name: typeof next.name === 'string' ? next.name.trim() : next.name, cas: normalizeCas(next.cas) };

@@ -4,13 +4,16 @@ const transportModes=['海运整柜','海运拼箱','空运','铁路','公路','
 const basic=[['cas','CAS 号','text'],['transportMode','运输方式',['',...transportModes]],['product','产品 / 规格','text'],['customer','客户','text'],['quoteCountry','报价国家 / 地区',['']],['creditMonths','账期（月）','number'],['creditPayment','信保付款方式',['','L/C','D/P','D/A 或 O/A']],['qty','数量 kg','number'],['sell','对客单价 USD/kg','number'],['customerTerm','Incoterm',['待确认','EXW','FCA','FOB','CFR','CIF','其他']],['place','交货地点 / 港口','text']];
 const costs=[['buy','工厂采购单价','number'],['fx','买汇 / 成本汇率 RMB/USD','number'],['receive','收汇汇率 RMB/USD','number'],['sea','国际运费 USD/票','number'],['local','国内费用总额 RMB/票','number'],['tax','增值税率 %','number'],['rebate','退税率 %','number']];
 const params=[['transport','运输保险费率 %','number'],['credit','信用保险费率 %','number'],['interest','年资金利率 %','number'],['months','资金占用月数','number']];
-const factoryFields=[['cas','CAS 号','text'],['quoteDate','报价日期','date'],['name','产品','text'],['factory','工厂','text'],['details','报价明细','text'],['quantity','数量','text'],['validity','报价有效期','date'],['price','报价单价','number'],['currency','币种',['USD','RMB']],['rebate','退税率 %（不退税填 0）','number'],['unit','计价单位',['待确认','吨','公斤']],['incoterm','Incoterm',['待确认','EXW','FCA','FOB','CFR','CIF','其他']],['port','交货地点','text'],['loading','装柜量 / 柜型','text'],['packing','包装方式','text'],['delivery','交货期（含年份）','text'],['warehouse','进仓费承担方',['我方','工厂']],['portfee','港杂费承担方',['我方','工厂']]];
-const freightFields=[['agent','货代名称','text'],['route','路线（起运地 → 目的地）','text'],['transportMode','运输方式',['海运整柜','海运拼箱','空运']],['basis','数量 / 柜型 / 费用范围','text'],['valid','有效期','date'],['sea','国际运费 USD/票','number'],['local','国内费用 RMB/票','number']];
+const factoryFields=[['cas','CAS 号','text'],['quoteDate','报价日期','date'],['name','产品','text'],['factory','工厂','text'],['details','报价明细','text'],['quantity','数量','text'],['validity','报价有效期','date'],['price','报价单价','number'],['currency','币种',['USD','RMB']],['tax','增值税率 %','number'],['rebate','退税率 %（不退税填 0）','number'],['unit','计价单位',['待确认','吨','公斤']],['incoterm','Incoterm',['待确认','EXW','FCA','FOB','CFR','CIF','其他']],['port','交货地点','text'],['loading','装柜量 / 柜型','text'],['packing','包装方式','text'],['delivery','交货期（含年份）','text'],['warehouse','进仓费承担方',['我方','工厂']],['portfee','港杂费承担方',['我方','工厂']]];
+const freightContainerTypes=['20GP','40GP','40HQ','45HQ'];
+const freightUnits=['公斤','吨','CBM','票'];
+const freightBulkyOptions=['否','是'];
+const freightFields=[['agent','货代名称','text'],['origin','起运地','text'],['destination','目的地','text'],['transportMode','运输方式',['海运整柜','海运拼箱','空运']],['containerType','柜型',freightContainerTypes],['quantity','询价数量','number'],['quantityUnit','询价单位',freightUnits],['bulky','是否抛货',freightBulkyOptions],['volume','体积（CBM）','number'],['valid','有效期','date'],['sea','国际运费 USD/票','number'],['local','国内费用 RMB/票','number']];
 const defaults={product:'',cas:'',customer:'',qty:null,sell:null,customerTerm:'待确认',place:'',buy:null,fx:6.75,receive:6.75,sea:null,local:null,tax:13,rebate:null,transport:.03,credit:null,interest:3.6,months:3};
 function validRebate(rate){return Number.isFinite(rate)&&rate>=0&&rate<=100;}
 function fcaCost(v){return (v.buy-v.buy/(1+v.tax/100)*(v.rebate/100))/v.fx;}
-function calculate(v,m){const revenue=v.qty*v.sell,insurance=revenue*1.1*v.transport/100,credit=revenue*v.credit/100,interest=revenue*v.interest/100/12*v.months;if(m==='own'){const unit=v.sell-insurance/v.qty-credit/v.qty-interest/v.qty-v.sea/v.qty-v.local/v.qty/v.fx;return{unit,rmb:unit*(1+v.tax/100)*v.fx,insurance,credit,interest}}const base=m==='rmb'?fcaCost(v):v.buy+v.local/v.fx/v.qty;const landed=base+v.sea/v.qty+(m==='rmb'?v.local/v.fx/v.qty:0);const profit=revenue-insurance-credit-interest-landed*v.qty;return{base,landed,profit,margin:base?v.qty?profit/(base*v.qty):0:0,rmb:revenue*v.receive-(insurance+credit+interest)*v.fx-landed*v.fx*v.qty,insurance,credit,interest}}
-const samples={rmb:{product:'20IBC of DPG',qty:20000,sell:2.33,sea:5000,local:2000,fx:6.67,buy:14.2,rebate:13,credit:.441},usd:{product:'Florfenicol-Sea FCL',customer:'STIM',qty:8000,sell:24.5,sea:2900,local:8000,fx:6.85,receive:6.75,buy:21.5},own:{product:'DCP',customer:'Kingchem',qty:1000,sell:27.5,sea:0,local:2000,fx:6.75,credit:.422,months:6}};
+function calculate(v,m){const revenue=v.qty*v.sell,insurance=revenue*1.1*v.transport/100,credit=revenue*v.credit/100,interest=revenue*v.interest/100/12*v.months;if(m==='own'){const rate=v.receive,unit=v.sell-(insurance+credit+interest+v.sea+v.local/rate)/v.qty;return{unit,rmb:unit*(1+v.tax/100)/(1+(v.tax-v.rebate)/100)*rate,insurance,credit,interest}}const base=m==='rmb'?fcaCost(v):v.buy+v.local/v.fx/v.qty;const landed=base+v.sea/v.qty+(m==='rmb'?v.local/v.fx/v.qty:0);const profit=revenue-insurance-credit-interest-landed*v.qty;return{base,landed,profit,margin:base?v.qty?profit/(base*v.qty):0:0,rmb:revenue*v.receive-(insurance+credit+interest)*v.fx-landed*v.fx*v.qty,insurance,credit,interest}}
+const samples={rmb:{product:'20IBC of DPG',qty:20000,sell:2.33,sea:5000,local:2000,fx:6.67,buy:14.2,rebate:13,credit:.441},usd:{product:'Florfenicol-Sea FCL',customer:'STIM',qty:8000,sell:24.5,sea:2900,local:8000,fx:6.85,receive:6.75,buy:21.5},own:{product:'DCP',customer:'Kingchem',qty:1000,sell:27.5,sea:0,seaMax:0,local:2000,receive:6.75,tax:13,rebate:13,credit:.422,months:6}};
 costs.push(['seaMax','最高国际运费 USD/票','number']);
 
 'use strict';
@@ -57,14 +60,48 @@ function normalizeFactoryDate(value) {
   const match = String(value ?? '').trim().match(/^(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})$/);
   return match ? `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}` : '';
 }
+const filterText = value => String(value ?? '').normalize('NFKC').trim();
+/** CAS filtering only keeps digits and letters so separators and full-width characters do not matter. */
+const casKey = value => filterText(value).replace(/[^0-9a-z]/gi, '').toLowerCase();
+/** Calculation history matches a CAS or customer keyword anywhere in the stored value; blank filters match everything. */
+function historyMatches(row, filter) {
+  const cas = casKey(filter?.cas), customer = filterText(filter?.customer).toLowerCase();
+  const values = row?.values ?? {};
+  if (cas && !casKey(values.cas).includes(cas)) return false;
+  if (customer && !filterText(values.customer).toLowerCase().includes(customer)) return false;
+  return true;
+}
 function catalogProducts(db) {
   const products = (db.products ?? []).map((product, manualIndex) => ({ ...product, manualIndex }));
-  const known = new Set(products.map(product => normalizeCas(product.cas)));
+  const known = new Map(products.map((product, index) => [normalizeCas(product.cas), index]));
+  // CAS binds the product name to its VAT/rebate rates: the newest saved calculation wins, factories fall back to rebate.
+  const rates = new Map();
+  const learn = (cas, tax, rebate) => {
+    const entry = rates.get(cas) ?? {};
+    if (entry.tax === undefined && nonnegative(tax)) entry.tax = tax;
+    if (entry.rebate === undefined && validRebate(rebate)) entry.rebate = rebate;
+    rates.set(cas, entry);
+  };
+  for (const record of db.history ?? []) {
+    if (record?.mode === 'usd') continue; // USD calculations hide VAT/rebate; keep the last RMB/own binding
+    const values = record?.values ?? {};
+    const cas = normalizeCas(values.cas);
+    if (cas) learn(cas, values.tax, values.rebate);
+  }
+  for (const quote of db.factories ?? []) {
+    const cas = normalizeCas(quote?.cas);
+    if (cas) learn(cas, quote.tax, quote.rebate);
+  }
+  for (const [cas, entry] of rates) {
+    const index = known.get(cas);
+    if (index !== undefined) Object.assign(products[index], entry);
+  }
   const saved = [...(db.history ?? []).map(record => record.values), ...(db.factories ?? []).map(quote => ({ product: quote.name, cas: quote.cas }))];
   for (const values of saved) {
     const cas = normalizeCas(values?.cas), name = values?.product?.trim();
     if (!name || !/^\d{2,7}-\d{2}-\d$/.test(cas) || known.has(cas)) continue;
-    products.push({ name, cas }); known.add(cas);
+    products.push({ name, cas, ...(rates.get(cas) ?? {}) });
+    known.set(cas, products.length - 1);
   }
   return products;
 }
@@ -74,13 +111,35 @@ const text = s => typeof s === 'string' && s.trim().length > 0;
 const object = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const modes = ['rmb', 'usd', 'own'];
 
+/** A bare quantity follows the quote unit; an explicit kg/t suffix wins. Ranges and loading specs stay unknown. */
+function factoryQuantityKg(value, unit) {
+  const match = String(value ?? '').replaceAll(',', '').trim().match(/^(\d+(?:\.\d+)?)\s*(kg|公斤|千克|t|吨|mt)?$/i);
+  if (!match) return null;
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  const tons = match[2] ? /^(t|吨|mt)$/i.test(match[2]) : unit === '吨';
+  return amount * (tons ? 1000 : 1);
+}
+/** C&F (CFR) unit cost only needs cost inputs, not selling price or credit terms. */
+function cfrCost(v, mode) {
+  if (!object(v) || !['rmb', 'usd'].includes(mode) || !positive(v.qty) || !positive(v.fx)) return null;
+  if (![v.buy, v.sea, v.local].every(nonnegative)) return null;
+  if (mode === 'rmb' && (!nonnegative(v.tax) || !validRebate(v.rebate))) return null;
+  const base = mode === 'rmb' ? fcaCost(v) : v.buy;
+  return base + v.sea / v.qty + v.local / v.fx / v.qty;
+}
+
 /** New calculations require explicit amounts; zero means confirmed no cost. */
 function validateCalculation(v, mode) {
-  if (!object(v) || !modes.includes(mode) || !positive(v.qty) || !positive(v.fx)) return false;
-  if (!['sell','sea','local','transport','credit','interest','months','tax'].every(k => nonnegative(v[k]))) return false;
-  if (mode !== 'own' && !nonnegative(v.buy)) return false;
+  if (!object(v) || !modes.includes(mode) || !positive(v.qty)) return false;
+  if (mode === 'own' ? !positive(v.receive) : !positive(v.fx)) return false;
   if (mode === 'usd' && !positive(v.receive)) return false;
-  if (mode === 'rmb' && (!validRebate(v.rebate) || !nonnegative(v.seaMax) || v.seaMax < v.sea)) return false;
+  if (!['sell','sea','seaMax','local','transport','credit','interest','months'].every(k => nonnegative(v[k]))) return false;
+  if (mode !== 'usd' && !nonnegative(v.tax)) return false;
+  if (mode !== 'own' && !nonnegative(v.buy)) return false;
+  if (v.seaMax < v.sea) return false;
+  if (mode !== 'usd' && !validRebate(v.rebate)) return false;
+  if (mode === 'own' && v.rebate - v.tax >= 100) return false; // 退税率不能达到 100% + 增值税率
   return true;
 }
 function validDate(s) {
@@ -97,16 +156,42 @@ function validateRecord(kind, r) {
     if (!text(r.name) || !positive(r.price)) throw new Error('工厂报价须填写产品名称和有效正数价格。');
     if (!['RMB','USD'].includes(r.currency) || !['吨','公斤'].includes(r.unit)) throw new Error('工厂报价须确认币种和计价单位。');
     if ((r.currency === 'RMB' || r.rebate != null) && !validRebate(r.rebate)) throw new Error('请填写 0–100 的退税率，不退税填 0。');
+    if (r.tax != null && !validRebate(r.tax)) throw new Error('请填写 0–100 的增值税率。');
   } else if (kind === 'freights') {
-    if (!['agent','route','basis'].every(k => text(r[k]))) throw new Error('货代报价须填写货代、路线和费用口径。');
-    if (!transportModes.includes(r.transportMode)) throw new Error('货代报价须确认有效运输方式。');
+    if (!text(r.agent)) throw new Error('货代报价须填写货代名称。');
+    // New records store origin/destination separately and scope FCL by container, LCL/air by inquiry quantity.
+    // Records created before this change keep one route text and one basis text, and must stay valid.
+    const scoped = text(r.origin) || text(r.destination) || text(r.containerType) || text(r.quantityUnit) || positive(r.quantity);
+    if (scoped) {
+      if (!text(r.origin) || !text(r.destination)) throw new Error('货代报价须分别填写起运地和目的地。');
+      if (!transportModes.includes(r.transportMode)) throw new Error('货代报价须确认有效运输方式。');
+      if (r.transportMode === '海运整柜') {
+        if (!freightContainerTypes.includes(r.containerType)) throw new Error('整柜报价须选择有效柜型。');
+      } else {
+        if (!positive(r.quantity)) throw new Error('拼箱或空运报价须填写询价数量。');
+        if (!freightUnits.includes(r.quantityUnit)) throw new Error('拼箱或空运报价须选择询价单位。');
+        if (r.transportMode === '海运拼箱' && r.bulky !== undefined && r.bulky !== null && r.bulky !== '') {
+          if (!freightBulkyOptions.includes(r.bulky)) throw new Error('拼箱报价须选择是否抛货。');
+          if (r.bulky === '是' && !positive(r.volume)) throw new Error('抛货报价须填写体积（CBM）。');
+        }
+      }
+    } else {
+      if (!['route','basis'].every(k => text(r[k]))) throw new Error('货代报价须填写货代、路线和费用口径。');
+      if (!transportModes.includes(r.transportMode)) throw new Error('货代报价须确认有效运输方式。');
+    }
     if (!validDate(r.valid)) throw new Error('货代报价须填写有效日期（年-月-日）。');
     if (!nonnegative(r.sea) || !nonnegative(r.local)) throw new Error('运费和国内费用须为非负数，无费用填 0。');
   } else if (kind === 'history') {
     if (!modes.includes(r.mode) || !object(r.values) || !text(r.values.product)) throw new Error('核算记录须包含有效模式、产品和核算数据。');
     // Original exports may predate rebate and seaMax. Never mutate their data.
     const v = {...r.values};
-    if (r.mode === 'rmb') { v.rebate ??= v.tax; v.seaMax ??= v.sea; }
+    if (r.mode === 'rmb') v.rebate ??= v.tax;
+    if (r.mode === 'own') {
+      // Older own-factory records used the purchase FX and had no freight ceiling or rebate.
+      v.seaMax ??= v.sea;
+      v.receive ??= v.fx;
+      v.rebate ??= 0;
+    } else v.seaMax ??= v.sea;
     if (!validateCalculation(v,r.mode)) throw new Error('核算记录中的数量、费用、汇率或退税率无效。');
     const keys = r.mode === 'own' ? ['unit','rmb','insurance','credit','interest'] : ['base','landed','profit','margin','rmb','insurance','credit','interest'];
     const resultOK = result => object(result) && keys.every(k => Number.isFinite(result[k]));
@@ -134,6 +219,24 @@ function validateDatabase(data) {
   }
   return data;
 }
+/** New records store origin and destination separately; legacy records keep one route string. */
+function freightRoute(row) {
+  const origin = String(row?.origin ?? '').trim(), destination = String(row?.destination ?? '').trim();
+  if (origin || destination) return { origin, destination };
+  const parts = String(row?.route ?? '').trim().split(/\s*(?:→|->|—|–|至|到|\bto\b)\s*/i).filter(Boolean);
+  return parts.length > 1
+    ? { origin: parts[0], destination: parts.slice(1).join(' → ') }
+    : { origin: parts[0] || '', destination: '' };
+}
+/** FCL compares by container type; LCL/air by inquiry quantity and unit; bulky LCL also by volume; legacy records keep their basis. */
+function freightBasis(row) {
+  if (row?.transportMode === '海运整柜' && text(row.containerType)) return row.containerType.trim();
+  if (row?.transportMode !== '海运整柜' && positive(row.quantity) && text(row.quantityUnit)) {
+    const base = `${row.quantity} ${String(row.quantityUnit).trim()}`;
+    return row.transportMode === '海运拼箱' && row.bulky === '是' && positive(row.volume) ? `${base} · 抛货 ${row.volume} CBM` : base;
+  }
+  return text(row?.basis) ? row.basis.trim() : '';
+}
 /** Invalid, incompatible, or expired selections return null. today is local YYYY-MM-DD or Date. */
 function averageFreights(rows, today = new Date()) {
   if (today instanceof Date) {
@@ -142,7 +245,7 @@ function averageFreights(rows, today = new Date()) {
   }
   if (!validDate(today) || !Array.isArray(rows) || !rows.length) return null;
   try { rows.forEach(r => validateRecord('freights',r)); } catch { return null; }
-  const key = r => JSON.stringify([r.route.trim(),r.transportMode,r.basis.trim()]);
+  const key = r => { const route = freightRoute(r); return JSON.stringify([route.origin, route.destination, r.transportMode, freightBasis(r)]); };
   if (rows.some(r => key(r) !== key(rows[0]) || r.valid < today)) return null;
   return {sea:rows.reduce((s,r)=>s+r.sea/rows.length,0), local:rows.reduce((s,r)=>s+r.local/rows.length,0), seaMin:Math.min(...rows.map(r=>r.sea)), seaMax:Math.max(...rows.map(r=>r.sea)), transportMode:rows[0].transportMode};
 }
@@ -176,7 +279,7 @@ function parseQuote(details) {
     name:'', factory:'', details, raw:details,
     price:single ? Number((single[1] || single[2]).replaceAll(',','')) : '',
     currency:single && /USD|美金|美元|\$/i.test(single[0]) ? 'USD' : 'RMB',
-    rebate:null, unit:ton === kg ? '待确认' : ton ? '吨' : '公斤',
+    tax:null, rebate:null, unit:ton === kg ? '待确认' : ton ? '吨' : '公斤',
     incoterm:details.match(/\b(EXW|FCA|FOB|CFR|CIF)\b/i)?.[1].toUpperCase() || '待确认',
     port:details.match(/青岛|上海|宁波|天津|深圳/)?.[0] || '',
     loading:details.match(/\d+(?:\.\d+)?\s*t\s*\/\s*\d+\s*(?:GP|HQ)/i)?.[0] || '',
@@ -199,4 +302,4 @@ function parseQuotes(raw) {
       validity:normalizeFactoryDate(explicit.validity)};
   });
 }
-export {normalizeCas,normalizeFactoryDate,catalogProducts,basic,costs,params,factoryFields,freightFields,defaults,samples,transportModes,creditCountries,lookupCreditRate,calculate,fcaCost,validRebate,validateCalculation,parseQuotes,validateRecord,validateDatabase,averageFreights};
+export {normalizeCas,normalizeFactoryDate,historyMatches,catalogProducts,basic,costs,params,factoryFields,freightFields,defaults,samples,transportModes,creditCountries,lookupCreditRate,calculate,fcaCost,cfrCost,factoryQuantityKg,validRebate,validateCalculation,parseQuotes,validateRecord,validateDatabase,averageFreights,freightRoute,freightBasis,freightContainerTypes,freightUnits,freightBulkyOptions};
