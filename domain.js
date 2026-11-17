@@ -4,7 +4,8 @@ const transportModes=['海运整柜','海运拼箱','空运','铁路','公路','
 const basic=[['cas','CAS 号','text'],['transportMode','运输方式',['',...transportModes]],['product','产品 / 规格','text'],['customer','客户','text'],['quoteCountry','报价国家 / 地区',['']],['creditMonths','账期（月）','number'],['creditPayment','信保付款方式',['','L/C','D/P','D/A 或 O/A']],['qty','数量 kg','number'],['sell','对客单价 USD/kg','number'],['customerTerm','Incoterm',['待确认','EXW','FCA','FOB','CFR','CIF','其他']],['place','交货地点 / 港口','text']];
 const costs=[['buy','工厂采购单价','number'],['fx','买汇 / 成本汇率 RMB/USD','number'],['receive','收汇汇率 RMB/USD','number'],['sea','国际运费 USD/票','number'],['local','国内费用总额 RMB/票','number'],['tax','增值税率 %','number'],['rebate','退税率 %','number']];
 const params=[['transport','运输保险费率 %','number'],['credit','信用保险费率 %','number'],['interest','年资金利率 %','number'],['months','资金占用月数','number']];
-const factoryFields=[['cas','CAS 号','text'],['quoteDate','报价日期','date'],['name','产品','text'],['factory','工厂','text'],['details','报价明细','text'],['quantity','数量','text'],['validity','报价有效期','date'],['price','报价单价','number'],['currency','币种',['USD','RMB']],['tax','增值税率 %','number'],['rebate','退税率 %（不退税填 0）','number'],['unit','计价单位',['待确认','吨','公斤']],['incoterm','Incoterm',['待确认','EXW','FCA','FOB','CFR','CIF','其他']],['port','交货地点','text'],['loading','装柜量 / 柜型','text'],['packing','包装方式','text'],['delivery','交货期（含年份）','text'],['warehouse','进仓费承担方',['我方','工厂']],['portfee','港杂费承担方',['我方','工厂']]];
+const factoryFields=[['cas','CAS 号','text'],['quoteDate','报价日期','date'],['name','产品','text'],['purity','含量 / 纯度','text'],['quality','其他关键质量指标','text'],['hazard','货物危险性','text'],['factory','工厂','text'],['details','报价明细','text'],['quantity','数量','text'],['validity','报价有效期','date'],['price','报价单价','number'],['currency','币种',['USD','RMB']],['tax','增值税率 %','number'],['rebate','退税率 %（不退税填 0）','number'],['unit','计价单位',['待确认','吨','公斤']],['incoterm','Incoterm',['待确认','EXW','FCA','FOB','CFR','CIF','其他']],['port','交货地点','text'],['loading','装柜量 / 柜型','text'],['packing','包装方式','text'],['delivery','交货期（含年份）','text'],['warehouse','进仓费承担方',['我方','工厂']],['portfee','港杂费承担方',['我方','工厂']]];
+const productFields=[['name','产品名称','text'],['cas','CAS 号','text'],['hazard','货物危险性','text'],['tax','增值税率 %','number'],['rebate','退税率 %','number']];
 const freightContainerTypes=['20GP','40GP','40HQ','45HQ'];
 const freightUnits=['公斤','吨','CBM','票'];
 const freightBulkyOptions=['否','是'];
@@ -60,6 +61,70 @@ function normalizeFactoryDate(value) {
   const match = String(value ?? '').trim().match(/^(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})$/);
   return match ? `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}` : '';
 }
+/** Local calendar date for form defaults; unlike toISOString this never shifts across midnight or time zones. */
+function localDateString(date = new Date()) {
+  if (!(date instanceof Date) || !Number.isFinite(date.getTime())) return '';
+  const pad = value => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+const chineseNumbers = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+const spelledNumbers = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, fifteen: 15, twenty: 20, thirty: 30, forty: 40, sixty: 60, ninety: 90 };
+function durationAmount(raw) {
+  const text = String(raw ?? '').toLowerCase();
+  if (/^\d+(?:\.\d+)?$/.test(text)) return Number(text);
+  if (spelledNumbers[text] !== undefined) return spelledNumbers[text];
+  if (!/^[一二两三四五六七八九十]+$/.test(text)) return null;
+  if (text.length === 1) return chineseNumbers[text];
+  if (text[0] === '十') return 10 + (chineseNumbers[text[1]] ?? 0);
+  if (text[1] === '十') return chineseNumbers[text[0]] * 10 + (chineseNumbers[text[2]] ?? 0);
+  return null;
+}
+/** "30 days", "two weeks", "三日内有效" and "有效期一个月" all describe a period measured from the quote date. */
+function validityDuration(value) {
+  const text = String(value ?? '').normalize('NFKC').trim().toLowerCase();
+  if (!text) return null;
+  // A period that starts after an order, payment or shipment is not a quote validity period.
+  if (/订单|合同|交货|装运|发货|付款|开证|生产|排产|order|purchase\s+order|\bPO\b|delivery|shipment|payment|production/i.test(text)) return null;
+  const match = text.match(/(\d+(?:\.\d+)?|[a-z]+|[一二两三四五六七八九十]+)\s*[- ]?\s*(days?|weeks?|months?|years?|天|日|周|星期|个?月|年)/i);
+  if (!match) return null;
+  const amount = durationAmount(match[1]);
+  if (!Number.isFinite(amount) || amount <= 0 || amount % 1 !== 0) return null;
+  const unit = /^(?:days?|天|日)$/.test(match[2]) ? 'day'
+    : /^(?:weeks?|周|星期)$/.test(match[2]) ? 'week'
+    : /^(?:months?|个?月)$/.test(match[2]) ? 'month'
+    : /^(?:years?|年)$/.test(match[2]) ? 'year' : null;
+  const limits = { day: 3650, week: 520, month: 120, year: 10 };
+  if (!unit || amount > limits[unit]) return null;
+  return { amount, unit };
+}
+const durationLabels = { day: '天', week: '周', month: '个月', year: '年' };
+function addValidityDate(quoteDate, duration) {
+  const base = normalizeFactoryDate(quoteDate);
+  if (!base || !validDate(base) || !duration || !Number.isFinite(duration.amount) || duration.amount <= 0) return '';
+  const date = new Date(`${base}T00:00:00Z`);
+  if (!Number.isFinite(date.getTime())) return '';
+  if (duration.unit === 'day' || duration.unit === 'week') {
+    date.setUTCDate(date.getUTCDate() + duration.amount * (duration.unit === 'week' ? 7 : 1));
+  } else {
+    const months = duration.amount * (duration.unit === 'year' ? 12 : 1);
+    const day = date.getUTCDate();
+    date.setUTCDate(1);
+    date.setUTCMonth(date.getUTCMonth() + months);
+    const lastDay = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
+    date.setUTCDate(Math.min(day, lastDay));
+  }
+  const result = date.toISOString().slice(0, 10);
+  return validDate(result) ? result : '';
+}
+/** Quote validity = quote date + the period stated in the quote; already-absolute dates need no conversion. */
+function factoryValidity(quoteDate, value) {
+  const base = normalizeFactoryDate(quoteDate);
+  if (!base || !validDate(base) || !String(value ?? '').trim() || normalizeFactoryDate(value)) return null;
+  const duration = validityDuration(value);
+  if (!duration) return null;
+  const date = addValidityDate(base, duration);
+  return date ? { date, duration, label: `${duration.amount} ${durationLabels[duration.unit]}` } : null;
+}
 const filterText = value => String(value ?? '').normalize('NFKC').trim();
 /** CAS filtering only keeps digits and letters so separators and full-width characters do not matter. */
 const casKey = value => filterText(value).replace(/[^0-9a-z]/gi, '').toLowerCase();
@@ -82,6 +147,8 @@ function catalogProducts(db) {
     if (entry.rebate === undefined && validRebate(rebate)) entry.rebate = rebate;
     rates.set(cas, entry);
   };
+  // Factory quotes also bind the cargo hazard. The newest quote for a CAS wins; a catalog override wins over it.
+  const hazards = new Map();
   for (const record of db.history ?? []) {
     if (record?.mode === 'usd') continue; // USD calculations hide VAT/rebate; keep the last RMB/own binding
     const values = record?.values ?? {};
@@ -90,23 +157,37 @@ function catalogProducts(db) {
   }
   for (const quote of db.factories ?? []) {
     const cas = normalizeCas(quote?.cas);
-    if (cas) learn(cas, quote.tax, quote.rebate);
+    if (!cas) continue;
+    learn(cas, quote.tax, quote.rebate);
+    const hazard = filterText(quote.hazard);
+    if (hazard && !hazards.has(cas)) hazards.set(cas, hazard);
   }
   for (const [cas, entry] of rates) {
     const index = known.get(cas);
-    if (index !== undefined) Object.assign(products[index], entry);
+    if (index === undefined) continue;
+    // Explicit catalog values win; otherwise keep following the latest calculation/quote.
+    const product = products[index];
+    if (!Number.isFinite(product.tax) && Number.isFinite(entry.tax)) product.tax = entry.tax;
+    if (!Number.isFinite(product.rebate) && Number.isFinite(entry.rebate)) product.rebate = entry.rebate;
+  }
+  for (const [cas, hazard] of hazards) {
+    const index = known.get(cas);
+    if (index !== undefined && !filterText(products[index].hazard)) products[index].hazard = hazard;
   }
   const saved = [...(db.history ?? []).map(record => record.values), ...(db.factories ?? []).map(quote => ({ product: quote.name, cas: quote.cas }))];
   for (const values of saved) {
     const cas = normalizeCas(values?.cas), name = values?.product?.trim();
     if (!name || !/^\d{2,7}-\d{2}-\d$/.test(cas) || known.has(cas)) continue;
-    products.push({ name, cas, ...(rates.get(cas) ?? {}) });
+    products.push({ name, cas, ...(rates.get(cas) ?? {}), ...(hazards.has(cas) ? { hazard: hazards.get(cas) } : {}) });
     known.set(cas, products.length - 1);
   }
   return products;
 }
 const nonnegative = n => Number.isFinite(n) && n >= 0;
 const positive = n => Number.isFinite(n) && n > 0;
+// 结构化文本只允许英文、数字和标点；工厂名称是中文字段的唯一例外。
+const chinesePattern = /[\u3000-\u303F\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/;
+const hasChinese = value => typeof value === 'string' && chinesePattern.test(value);
 const text = s => typeof s === 'string' && s.trim().length > 0;
 const object = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const modes = ['rmb', 'usd', 'own'];
@@ -152,6 +233,9 @@ function validateRecord(kind, r) {
   if (!object(r)) throw new Error('记录必须是有效对象。');
   if (kind === 'products') {
     if (!text(r.name) || typeof r.cas !== 'string' || !/^\d{2,7}-\d{2}-\d$/.test(normalizeCas(r.cas))) throw new Error('请填写产品名称和 CAS 号，格式如 67-68-5。');
+    if (r.hazard != null && typeof r.hazard !== 'string') throw new Error('货物危险性须为文本。');
+    if (r.tax != null && !validRebate(r.tax)) throw new Error('请填写 0–100 的增值税率。');
+    if (r.rebate != null && !validRebate(r.rebate)) throw new Error('请填写 0–100 的退税率。');
   } else if (kind === 'factories') {
     if (!text(r.name) || !positive(r.price)) throw new Error('工厂报价须填写产品名称和有效正数价格。');
     if (!['RMB','USD'].includes(r.currency) || !['吨','公斤'].includes(r.unit)) throw new Error('工厂报价须确认币种和计价单位。');
@@ -264,6 +348,25 @@ function quoteRows(raw) {
   row.push(value.replace(/\r$/,'')); rows.push(row);
   return rows.filter(r=>r.some(s=>s.trim()));
 }
+/** "class 9 UN3082", "class 3", "UN 1993" and labeled hazard text all describe cargo hazard. */
+function extractHazard(value) {
+  const details = String(value ?? '');
+  const labeled = details.match(/(?:货物危险性|危险(?:性|品|货物)?(?:类别|等级|分类)?|hazard(?:ous\s+goods)?|danger(?:ous\s+goods)?)\s*[:：]\s*([^。\n;；]+)/i)?.[1]?.trim();
+  if (labeled) return labeled;
+  const classMatch = details.match(/\bclass\s*[:：]?\s*(\d+(?:\.\d+)?|[xX])\b/i)
+    || details.match(/第?\s*(\d+(?:\.\d+)?)\s*类/);
+  const unMatch = details.match(/\bUN\s*(?:No\.?|Number|编号)?\s*[:：]?\s*(\d{4}|[xX]{4})\b/i);
+  const clean = text => text.replace(/\s+/g, ' ').trim();
+  if (classMatch && unMatch && Math.abs(classMatch.index - unMatch.index) <= 48) {
+    return classMatch.index <= unMatch.index
+      ? `${clean(classMatch[0])} ${clean(unMatch[0])}`
+      : `${clean(unMatch[0])} ${clean(classMatch[0])}`;
+  }
+  if (classMatch) return clean(classMatch[0]);
+  if (unMatch) return clean(unMatch[0]);
+  return details.match(/(?:^|[，,。；;\s])(非危险品|非危险货物|危险品|危险货物)(?=$|[，,。；;\s])/)?.[1]
+    || (/(?:非危险品|非危险货物|not dangerous goods|non-hazardous)/i.test(details) ? '非危险品' : '');
+}
 function parseQuote(details) {
   const amount = '(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d+)?';
   const prices = [...details.matchAll(new RegExp(`(?:USD|RMB|CNY|人民币|美金|美元|[$￥¥])\\s*(${amount})|(${amount})\\s*(?:美金|美元|人民币|USD|RMB|CNY|元)`, 'gi'))];
@@ -275,8 +378,12 @@ function parseQuote(details) {
   const single = prices.length === 1 && !priceRange && !negativePrice ? prices[0] : null;
   const ton = /每吨|\/\s*吨|\/\s*MT\b|\/\s*TON(?:NE)?S?\b/i.test(details);
   const kg = /每公斤|每千克|\/\s*kg\b|\/\s*公斤|\/\s*千克/i.test(details);
+  const purity = (details.match(/(?:含量|纯度|purity|assay)\s*[:：]?\s*[≥>]?\s*(\d{1,3}(?:\.\d+)?\s*%)/i)
+    || details.match(/(\d{1,3}(?:\.\d+)?\s*%)\s*(?:min\b|以上)?\s*(?:含量|纯度|purity|assay)/i))?.[1]?.trim() || '';
+  const quality = details.match(/(?:其他关键质量指标|其他质量指标|质量指标|quality indicators?)\s*[:：]\s*([^。\n;；]+)/i)?.[1]?.trim() || '';
+  const hazard = extractHazard(details);
   return {
-    name:'', factory:'', details, raw:details,
+    name:'', purity, quality, hazard, factory:'', details, raw:details,
     price:single ? Number((single[1] || single[2]).replaceAll(',','')) : '',
     currency:single && /USD|美金|美元|\$/i.test(single[0]) ? 'USD' : 'RMB',
     tax:null, rebate:null, unit:ton === kg ? '待确认' : ton ? '吨' : '公斤',
@@ -294,12 +401,13 @@ function parseQuotes(raw) {
   if (typeof raw !== 'string' || !raw.trim()) return [];
   const rows=quoteRows(raw), header=(rows[0]||[]).map(s=>s.replace(/^\uFEFF/,'').trim());
   if (!header.includes('产品') || !header.includes('报价明细')) return [parseQuote(raw)];
-  const keys={'产品':'name','工厂':'factory','报价明细':'details','数量':'quantity','CAS':'cas','CAS 号':'cas','CAS号':'cas','报价日期':'quoteDate','报价有效期':'validity','交货期':'delivery'};
+  const keys={'产品':'name','工厂':'factory','报价明细':'details','数量':'quantity','CAS':'cas','CAS 号':'cas','CAS号':'cas','报价日期':'quoteDate','报价有效期':'validity','交货期':'delivery','含量':'purity','纯度':'purity','含量/纯度':'purity','含量 / 纯度':'purity','其他关键质量指标':'quality','质量指标':'quality','货物危险性':'hazard','危险性':'hazard','危险品':'hazard','危险货物':'hazard','危险品类别':'hazard','危险品等级':'hazard','危险货物类别':'hazard','hazard':'hazard'};
   return rows.slice(1).map(row=>{
     const explicit=Object.fromEntries(header.flatMap((key,i)=>keys[key]?[[keys[key],row[i]||'']]:[]));
     return {...parseQuote(explicit.details),...explicit,
       cas:normalizeCas(explicit.cas), quoteDate:normalizeFactoryDate(explicit.quoteDate),
-      validity:normalizeFactoryDate(explicit.validity)};
+      // Keep a stated period such as "30 days"; the form turns it into quoteDate + 30 days.
+      validity:normalizeFactoryDate(explicit.validity) || String(explicit.validity ?? '').trim()};
   });
 }
-export {normalizeCas,normalizeFactoryDate,historyMatches,catalogProducts,basic,costs,params,factoryFields,freightFields,defaults,samples,transportModes,creditCountries,lookupCreditRate,calculate,fcaCost,cfrCost,factoryQuantityKg,validRebate,validateCalculation,parseQuotes,validateRecord,validateDatabase,averageFreights,freightRoute,freightBasis,freightContainerTypes,freightUnits,freightBulkyOptions};
+export {normalizeCas,normalizeFactoryDate,localDateString,validityDuration,addValidityDate,factoryValidity,historyMatches,catalogProducts,basic,costs,params,factoryFields,productFields,freightFields,defaults,samples,transportModes,creditCountries,lookupCreditRate,calculate,fcaCost,cfrCost,factoryQuantityKg,validRebate,hasChinese,validateCalculation,parseQuotes,extractHazard,validateRecord,validateDatabase,averageFreights,freightRoute,freightBasis,freightContainerTypes,freightUnits,freightBulkyOptions};

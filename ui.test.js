@@ -89,15 +89,26 @@ function renderer() {
 }
 
 function factory(id, overrides = {}) {
-  return { id, name: `报价 ${id}`, cas: '67-68-5', price: 14000, currency: 'RMB', unit: '吨',
-    rebate: 13, incoterm: 'FOB', port: '青岛', factory: '测试工厂', quoteDate: '2026-11-01',
+  return { id, name: `Quote ${id}`, cas: '67-68-5', price: 14000, currency: 'RMB', unit: '吨',
+    rebate: 13, incoterm: 'FOB', port: 'Qingdao', factory: '测试工厂', quoteDate: '2026-11-01',
     validity: '2026-12-01', createdAt: '2026-11-01T00:00:00Z', updatedAt: '2026-11-01T00:00:00Z', ...overrides };
 }
+const localDate = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+const addDays = (value, days) => {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+};
 async function mount(t, seed = {}, parseResponses = [], storedSession = null) {
-  const driver = renderer(), requests = [], sessionValues = storedSession || new Map();
+  const driver = renderer(), requests = [], downloads = [], sessionValues = storedSession || new Map();
   const memory = { revision: 7, factories: [], products: [], history: [], freights: [], ...copy(seed) };
+  class FakeBlob {
+    constructor(parts, options = {}) { this.parts = parts; this.type = options.type || ''; }
+  }
   const sandbox = vm.createContext({
-    AbortController, console,
+    AbortController, console, Blob: FakeBlob, atob,
+    URL: { createObjectURL: () => 'blob:quote-test', revokeObjectURL: () => {} },
+    setTimeout: () => {},
+    document: { createElement: () => ({ href: '', download: '', click() { downloads.push(this.download); } }) },
     window: { confirm: () => true },
     sessionStorage: {
       getItem: key => sessionValues.has(key) ? sessionValues.get(key) : null,
@@ -114,6 +125,10 @@ async function mount(t, seed = {}, parseResponses = [], storedSession = null) {
       else if (input.action === 'parse') {
         assert.ok(parseResponses.length, 'AI parse must have an explicit fixture response');
         value = parseResponses.shift();
+      }
+      else if (input.action === 'quotation') {
+        assert.ok(Array.isArray(input.items) && input.items.length, 'quotation must include item values');
+        value = { filename: 'Quotation_Test.xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', base64: 'ZmFrZS14bHN4' };
       }
       else if (['update', 'add', 'delete'].includes(input.action)) {
         if (input.revision !== memory.revision) return { ok: false, status: 409, json: async () => ({ error: '记录已更新，请刷新后重试。' }) };
@@ -136,6 +151,7 @@ async function mount(t, seed = {}, parseResponses = [], storedSession = null) {
   driver.mount(App); await driver.flush(); t.after(() => driver.dispose());
   const api = {
     memory, requests, calculate: sandbox.testCalculate,
+    get downloads() { return downloads; },
     get tree() { return driver.tree; },
     async remount() { driver.reset(); driver.mount(App); await driver.flush(); },
     async reload() { App = createApp(); driver.reset(); driver.mount(App); await driver.flush(); },
@@ -156,10 +172,85 @@ async function mount(t, seed = {}, parseResponses = [], storedSession = null) {
       if (control.type === 'select') assert.ok(all(control, n => n.type === 'option' && n.props.value === value).length, `select ${label} must offer ${value}`);
       await control.props.onChange({ target: { value: String(value) } }); await driver.flush();
     },
+    async toggle(label) {
+      const control = one(all(driver.tree, n => n.type === 'input' && n.props.type === 'checkbox' && n.props['aria-label'] === label), `checkbox ${label}`);
+      await control.props.onChange({ target: { checked: !control.props.checked } }); await driver.flush();
+    },
     options(label) { return all(api.field(label), n => n.type === 'option').map(n => n.props.value).filter(Boolean); },
   };
   return api;
 }
+
+test('history selection merges same-customer products with their factory sources', async t => {
+  const base = { qty: 1000, sell: 5, buy: 14, fx: 7, receive: 7, sea: 100, seaMax: 300, local: 0, tax: 13, rebate: 13, transport: 0, credit: 0, interest: 0, months: 0, customerTerm: 'CIF', place: 'Oslo' };
+  const result = { base: 2, landed: 2.1, profit: 1, margin: 1, rmb: 1, insurance: 0, credit: 0, interest: 0 };
+  const ui = await mount(t, {
+    factories: [
+      factory('f1', { name: 'MCP 22%', cas: '67-68-5', purity: '22% P', packing: '25 kg / bag', validity: '2026-11-20', delivery: 'November 2026' }),
+      factory('f2', { name: 'Urea 46%', cas: '57-13-6', purity: '46% N', packing: '50 kg / bag', validity: '2026-11-25', delivery: 'December 2026' }),
+    ],
+    history: [
+      { id: 'h1', mode: 'rmb', date: '2026-11-01T00:00:00Z', values: { ...base, product: 'MCP 22%', cas: '67-68-5', customer: 'ACME', creditMonths: 3, creditPayment: 'L/C' }, result },
+      { id: 'h2', mode: 'rmb', date: '2026-11-02T00:00:00Z', values: { ...base, product: 'Urea 46%', cas: '57-13-6', customer: 'ACME' }, result },
+    ],
+  });
+  await ui.click('核算记录');
+  assert.equal(ui.button('合并输出报价单').props.disabled, true);
+  await ui.toggle('选择 MCP 22%');
+  await ui.toggle('选择 Urea 46%');
+  assert.match(text(ui.tree), /已选 2 条 · ACME/);
+  assert.equal(ui.button('合并输出报价单').props.disabled, false);
+  await ui.click('合并输出报价单');
+  const request = one(ui.requests.filter(row => row.action === 'quotation'), 'quotation request');
+  assert.equal(request.items.length, 2);
+  assert.equal(request.includeCosting, true);
+  assert.deepEqual(request.items.map(item => item.factoryId), ['f1', 'f2']);
+  assert.equal(request.items[0].values.customer, 'ACME');
+  assert.equal(request.items[0].values.product, 'MCP 22%');
+  assert.equal(request.items[1].values.product, 'Urea 46%');
+  assert.deepEqual(ui.downloads, ['Quotation_Test.xlsx']);
+  assert.equal(ui.memory.revision, 7);
+});
+
+test('calculation exports an editable quotation with the active factory source', async t => {
+  const ui = await mount(t, { factories: [factory('rmb')] });
+  await ui.click('报价核算');
+  assert.equal(ui.button('输出报价单').props.disabled, true);
+  await ui.click('载入 Excel 样例');
+  assert.equal(ui.button('输出报价单').props.disabled, true);
+  await ui.change('选取工厂报价', 'rmb');
+  assert.equal(ui.button('输出报价单').props.disabled, false);
+  assert.match(ui.button('输出报价单').props.className, /qw-export-button/);
+  assert.match(text(ui.tree), /生成英文 Quotation 和内部 Costing 工作表/);
+  await ui.click('输出报价单');
+  const request = one(ui.requests.filter(row => row.action === 'quotation'), 'quotation request');
+  assert.equal(request.mode, undefined);
+  assert.equal(request.includeCosting, true);
+  assert.equal(request.items.length, 1);
+  assert.equal(request.items[0].mode, 'rmb');
+  assert.equal(request.items[0].factoryId, 'rmb');
+  assert.equal(request.items[0].values.product, 'Quote rmb');
+  assert.equal(request.items[0].values.qty, 20000);
+  assert.equal(request.items[0].values.sell, 2.33);
+  assert.deepEqual(ui.downloads, ['Quotation_Test.xlsx']);
+  assert.match(text(ui.tree), /已生成 Quotation_Test\.xlsx/);
+  assert.equal(ui.memory.revision, 7, 'exporting must not write records');
+});
+
+test('customer-only export can be selected and excludes Costing', async t => {
+  const ui = await mount(t, { factories: [factory('rmb')] });
+  await ui.click('报价核算');
+  await ui.click('载入 Excel 样例');
+  await ui.change('选取工厂报价', 'rmb');
+  await ui.toggle('包含成本数据');
+  assert.equal(ui.button('输出报价单').props.disabled, false);
+  await ui.click('输出报价单');
+  const request = one(ui.requests.filter(row => row.action === 'quotation'), 'quotation request');
+  assert.equal(request.includeCosting, false);
+  assert.equal(request.items.length, 1);
+  assert.deepEqual(ui.downloads, ['Quotation_Test.xlsx']);
+  assert.match(text(ui.tree), /仅含客户 Quotation 页/);
+});
 
 test('factory source options filter currency, usable units/prices and normalized CAS; mode changes clear selection', async t => {
   const ui = await mount(t, { factories: [factory('rmb'), factory('usd', { currency: 'USD' }),
@@ -171,6 +262,10 @@ test('factory source options filter currency, usable units/prices and normalized
   assert.deepEqual(ui.options('选取工厂报价'), ['rmb']);
   await ui.change('选取工厂报价', 'rmb');
   assert.equal(ui.field('含税采购单价 RMB/kg').props.value, 14);
+  assert.equal(ui.field('工厂').props.value, '测试工厂');
+  assert.equal(ui.field('工厂').props.disabled, true);
+  const costSection = one(all(ui.tree, n => n.type === 'div' && n.props.className === 'qw-section' && n.children.some(child => child?.type === 'h3' && text(child) === '02 / 工厂与运输成本')), 'cost section');
+  assert.equal(all(costSection, n => n.type === 'label').map(text)[0], '工厂');
   await ui.change('CAS 号', '64-17-5');
   assert.equal(ui.field('选取工厂报价').props.value, '');
   assert.equal(ui.button('带入成本').props.disabled, true);
@@ -229,7 +324,7 @@ test('confirmed CAS fills product, VAT and rebate from saved history and clears 
 test('saving a calculation remembers its VAT and rebate for the CAS', async t => {
   const ui = await mount(t);
   await ui.click('报价核算');
-  await ui.change('产品 / 规格', '新产品');
+  await ui.change('产品 / 规格', 'NewProduct');
   await ui.change('CAS 号', '75-07-0');
   await ui.change('数量 kg', 20000);
   await ui.change('对客单价 USD/kg', 2.33);
@@ -249,12 +344,12 @@ test('saving a calculation remembers its VAT and rebate for the CAS', async t =>
   assert.equal(ui.field('增值税率 %').props.value, 13, 'the sample resets the rates');
   assert.equal(ui.field('退税率 %').props.value, 13);
   await ui.change('CAS 号', '75-07-0');
-  assert.equal(ui.field('产品 / 规格').props.value, '新产品');
+  assert.equal(ui.field('产品 / 规格').props.value, 'NewProduct');
   assert.equal(ui.field('增值税率 %').props.value, 12);
   assert.equal(ui.field('退税率 %').props.value, 7);
 
   await ui.click('产品目录');
-  assert.match(text(ui.article('新产品')), /增值税率 12% · 退税率 7%/);
+  assert.match(text(ui.article('NewProduct')), /增值税率 12% · 退税率 7%/);
 });
 
 test('CAS rate binding uses the newest saved calculation', async t => {
@@ -288,7 +383,7 @@ test('factory quote form puts VAT before rebate and fills both from the CAS bind
   assert.equal(ui.field('退税率 %（不退税填 0）').props.value, '');
 });
 
-test('factory draft survives leaving and re-entering within ten minutes', async t => {
+test('factory draft survives leaving and re-entering within five minutes', async t => {
   const ui = await mount(t);
   await ui.click('工厂报价');
   await ui.change('产品', '草稿产品');
@@ -302,18 +397,116 @@ test('factory draft survives leaving and re-entering within ten minutes', async 
   assert.equal(ui.field('原始报价 / Excel 表格').props.value, '草稿原文');
 });
 
-test('factory draft older than ten minutes is discarded', async t => {
-  const key = 'quote-workbench.factory.v1';
+test('freight and product drafts survive leaving and re-entering within five minutes', async t => {
+  const ui = await mount(t);
+  await ui.click('货代报价');
+  await ui.change('货代名称', '草稿货代');
+  await ui.change('起运地', '草稿起运地');
+  await ui.change('目的地', '草稿目的地');
+  await ui.change('运输方式', '海运拼箱');
+  await ui.change('询价数量', 25);
+  await ui.change('是否抛货', '是');
+  await ui.change('体积（CBM）', 4);
+  await ui.click('产品目录');
+  await ui.change('产品名称', '草稿产品');
+  await ui.change('CAS 号', '67-68-5');
+  await ui.change('搜索产品名称或 CAS', '草稿');
+  await ui.remount();
+  assert.equal(ui.button('产品目录').props['aria-current'], 'page', 'last page restores with the draft');
+  assert.equal(ui.field('产品名称').props.value, '草稿产品');
+  assert.equal(ui.field('CAS 号').props.value, '67-68-5');
+  assert.equal(ui.field('搜索产品名称或 CAS').props.value, '草稿');
+  await ui.click('货代报价');
+  assert.equal(ui.field('货代名称').props.value, '草稿货代');
+  assert.equal(ui.field('起运地').props.value, '草稿起运地');
+  assert.equal(ui.field('目的地').props.value, '草稿目的地');
+  assert.equal(ui.field('运输方式').props.value, '海运拼箱');
+  assert.equal(ui.field('询价数量').props.value, 25);
+  assert.equal(ui.field('是否抛货').props.value, '是');
+  assert.equal(ui.field('体积（CBM）').props.value, 4);
+});
+
+test('history filter and selection drafts survive leaving and re-entering within five minutes', async t => {
+  const row = (id, product) => ({ id, mode: 'rmb', date: '2026-11-01T00:00:00Z',
+    values: { product, customer: '客户甲', cas: '67-68-5', qty: 1000, sell: 5, buy: 14, fx: 7, receive: 7, sea: 100, local: 0, tax: 13, rebate: 13, transport: 0, credit: 0, interest: 0, months: 0, customerTerm: '待确认' },
+    result: { base: 2, landed: 2.1, profit: 1000, margin: .1, rmb: 7000, insurance: 0, credit: 0, interest: 0 } });
+  const ui = await mount(t, { history: [row('a', '历史甲'), row('b', '历史乙')] });
+  await ui.click('核算记录');
+  await ui.change('按 CAS 筛选核算记录', '67-68');
+  await ui.change('按客户名称筛选核算记录', '客户甲');
+  await ui.click('全选当前结果');
+  await ui.remount();
+  assert.equal(ui.button('核算记录').props['aria-current'], 'page');
+  assert.equal(ui.field('按 CAS 筛选核算记录').props.value, '67-68');
+  assert.equal(ui.field('按客户名称筛选核算记录').props.value, '客户甲');
+  const checks = all(ui.tree, node => node.type === 'input' && String(node.props['aria-label'] || '').startsWith('选择 '));
+  assert.equal(checks.length, 2);
+  assert.ok(checks.every(node => node.props.checked), 'selected history records restore');
+});
+
+test('drafts older than five minutes are discarded for every page', async t => {
+  const key = 'quote-workbench.drafts.v2';
   const stored = new Map([[key, JSON.stringify({
-    form: { product: '过期草稿', tax: 9, rebate: 7 },
-    raw: '旧原文', pending: [], index: 0, editing: null,
-    savedAt: Date.now() - 11 * 60 * 1000,
+    savedAt: Date.now() - 6 * 60 * 1000,
+    tab: 'products',
+    factory: { form: { product: '过期草稿', tax: 9, rebate: 7 }, raw: '旧原文', pending: [], index: 0, editing: null },
+    freight: { agent: '旧货代', origin: '旧起运地', destination: '旧目的地' },
+    product: { name: 'OldProduct', cas: '67-68-5', tax: 9, rebate: 7 },
+    catalogSearch: '旧搜索',
+    historyFilter: { cas: '67-68', customer: '旧客户' },
+    selected: ['a'],
+    selectedHistory: ['a'],
+    historySource: 'a',
   })]]);
   const ui = await mount(t, {}, [], stored);
-  await ui.click('工厂报价');
+  assert.equal(ui.button('工厂报价').props['aria-current'], 'page', 'expired tab falls back to the first page');
   assert.equal(ui.field('产品').props.value, '');
-  assert.equal(ui.field('增值税率 %').props.value, '');
   assert.equal(ui.field('原始报价 / Excel 表格').props.value, '');
+  await ui.click('货代报价');
+  assert.equal(ui.field('货代名称').props.value, '');
+  assert.equal(ui.field('起运地').props.value, '');
+  assert.equal(ui.field('目的地').props.value, '');
+  await ui.click('产品目录');
+  assert.equal(ui.field('产品名称').props.value, '');
+  assert.equal(ui.field('CAS 号').props.value, '');
+  assert.equal(ui.field('搜索产品名称或 CAS').props.value, '');
+  await ui.click('核算记录');
+  assert.equal(ui.field('按 CAS 筛选核算记录').props.value, '');
+  assert.equal(ui.field('按客户名称筛选核算记录').props.value, '');
+  assert.equal(all(ui.tree, node => node.type === 'input' && node.props.checked && node.props['aria-label'] !== '包含成本数据').length, 0);
+  await ui.click('报价核算');
+  assert.equal(ui.field('数量 kg').props.value, '');
+});
+
+test('structured text blocks Chinese except the factory name', async t => {
+  const ui = await mount(t);
+  await ui.click('工厂报价');
+  await ui.change('产品', '中文产品');
+  assert.equal(ui.field('产品').props['aria-invalid'], true);
+  assert.ok(all(ui.tree, n => n.props.className === 'qw-field-error' && text(n) === '不能包含中文').length >= 1);
+  await ui.change('工厂', '中文工厂');
+  assert.equal(ui.field('工厂').props['aria-invalid'], undefined, 'factory names may contain Chinese');
+  await ui.change('原始报价 / Excel 表格', '中文原文');
+  await ui.change('其他关键质量指标', '中文质量');
+  assert.equal(ui.field('其他关键质量指标').props['aria-invalid'], undefined, 'long text fields are exempt');
+  await ui.change('报价单价', 100);
+  await ui.change('币种', 'RMB');
+  await ui.change('计价单位', '公斤');
+  await ui.change('退税率 %（不退税填 0）', 0);
+  await ui.click('确认并保存报价');
+  assert.equal(ui.memory.factories.length, 0, 'Chinese in a structured field blocks saving');
+  assert.match(text(one(all(ui.tree, n => n.props.role === 'alert'), 'error')), /不能包含中文/);
+  await ui.change('产品', 'EnglishProduct');
+  await ui.click('确认并保存报价');
+  assert.equal(ui.memory.factories.length, 1);
+  assert.equal(ui.memory.factories[0].factory, '中文工厂');
+  assert.equal(ui.memory.factories[0].raw, '中文原文');
+
+  await ui.click('报价核算');
+  await ui.change('产品 / 规格', '中文产品');
+  assert.equal(ui.field('产品 / 规格').props['aria-invalid'], true);
+  await ui.change('CAS 号', '67-68-5');
+  assert.equal(ui.field('CAS 号').props['aria-invalid'], undefined);
 });
 
 test('own-factory reverse page uses receipt FX, min/max freight, VAT and rebate for its range', async t => {
@@ -368,9 +561,9 @@ test('selecting a factory quote auto-fills cost fields, converts tonnes, preserv
   await ui.click('报价核算'); await ui.change('Incoterm', 'CIF');
   await ui.change('选取工厂报价', 'rmb');
   assert.equal(ui.field('含税采购单价 RMB/kg').props.value, 14);
-  assert.equal(ui.field('产品 / 规格').props.value, '报价 rmb');
+  assert.equal(ui.field('产品 / 规格').props.value, 'Quote rmb');
   assert.equal(ui.field('CAS 号').props.value, '67-68-5');
-  assert.equal(ui.field('交货地点 / 港口').props.value, '青岛');
+  assert.equal(ui.field('交货地点 / 港口').props.value, 'Qingdao');
   assert.equal(ui.field('退税率 %').props.value, 13);
   assert.equal(ui.field('Incoterm').props.value, 'CIF');
   assert.equal(ui.button('人民币采购').props['aria-pressed'], true);
@@ -380,7 +573,7 @@ test('selecting a factory quote auto-fills cost fields, converts tonnes, preserv
   assert.equal(ui.field('Incoterm').props.value, 'CIF');
   assert.equal(ui.button('人民币采购').props['aria-pressed'], true);
   assert.equal(ui.field('退税率 %').props.value, 13);
-  await ui.click('工厂报价'); await ui.click('带入核算', ui.article('报价 usd'));
+  await ui.click('工厂报价'); await ui.click('带入核算', ui.article('Quote usd'));
   assert.equal(ui.button('美元采购').props['aria-pressed'], true);
   assert.equal(ui.field('采购单价 USD/kg').props.value, 2.1);
   assert.equal(ui.field('Incoterm').props.value, 'CIF');
@@ -432,6 +625,8 @@ test('USD factory quote shows min/max freight, hides VAT and shows C&F cost befo
   await ui.change('选取工厂报价', 'usd');
   assert.equal(ui.field('采购单价 USD/kg').props.value, 2.1);
   assert.equal(ui.field('数量 kg').props.value, 20000);
+  assert.equal(ui.field('工厂').props.value, '测试工厂');
+  assert.equal(ui.field('工厂').props.disabled, true);
   assert.equal(ui.field('最高国际运费 USD/票').props.value, 2900, 'max freight follows the minimum when the quote is applied');
   let results = text(one(all(ui.tree, n => n.props.className === 'qw-results-body'), 'results body'));
   assert.match(results, /C&F 成本 USD\/kg/);
@@ -572,24 +767,24 @@ test('freight form splits origin/destination and swaps container type for inquir
   assert.equal(ui.field('柜型').props.value, '20GP');
   assert.equal(all(ui.tree, n => n.type === 'label' && text(n) === '询价数量').length, 0);
   assert.equal(all(ui.tree, n => n.type === 'label' && text(n) === '询价单位').length, 0);
-  await ui.change('货代名称', '货代甲');
-  await ui.change('起运地', '上海');
-  await ui.change('目的地', '汉堡');
+  await ui.change('货代名称', 'AgentA');
+  await ui.change('起运地', 'Shanghai');
+  await ui.change('目的地', 'Hamburg');
   await ui.change('柜型', '40HQ');
   await ui.change('有效期', '2026-12-01');
   await ui.change('国际运费 USD/票', 1000);
   await ui.change('国内费用 RMB/票', 500);
   await ui.click('保存货代报价');
-  const fcl = ui.memory.freights.find(row => row.agent === '货代甲');
+  const fcl = ui.memory.freights.find(row => row.agent === 'AgentA');
   assert.deepEqual(
     { origin: fcl.origin, destination: fcl.destination, transportMode: fcl.transportMode, containerType: fcl.containerType, sea: fcl.sea, local: fcl.local },
-    { origin: '上海', destination: '汉堡', transportMode: '海运整柜', containerType: '40HQ', sea: 1000, local: 500 });
+    { origin: 'Shanghai', destination: 'Hamburg', transportMode: '海运整柜', containerType: '40HQ', sea: 1000, local: 500 });
   assert.equal(fcl.route, undefined);
   assert.equal(fcl.basis, undefined);
   assert.equal(fcl.quantity, undefined);
-  const fclText = text(one(all(ui.tree, n => n.type === 'article' && text(n).includes('货代甲')), 'freight record'));
-  assert.match(fclText, /起运地：上海/);
-  assert.match(fclText, /目的地：汉堡/);
+  const fclText = text(one(all(ui.tree, n => n.type === 'article' && text(n).includes('AgentA')), 'freight record'));
+  assert.match(fclText, /起运地：Shanghai/);
+  assert.match(fclText, /目的地：Hamburg/);
   assert.match(fclText, /柜型：40HQ/);
   await ui.change('运输方式', '海运拼箱');
   assert.equal(all(ui.tree, n => n.type === 'label' && text(n) === '柜型').length, 0);
@@ -598,16 +793,16 @@ test('freight form splits origin/destination and swaps container type for inquir
   assert.equal(all(ui.tree, n => n.type === 'label' && text(n) === '体积（CBM）').length, 0);
   await ui.change('是否抛货', '是');
   assert.ok(ui.field('体积（CBM）'));
-  await ui.change('货代名称', '货代乙');
-  await ui.change('起运地', '宁波');
-  await ui.change('目的地', '洛杉矶');
+  await ui.change('货代名称', 'AgentB');
+  await ui.change('起运地', 'Ningbo');
+  await ui.change('目的地', 'LosAngeles');
   await ui.change('询价数量', 2.5);
   await ui.change('体积（CBM）', 3);
   await ui.change('有效期', '2026-12-02');
   await ui.change('国际运费 USD/票', 300);
   await ui.change('国内费用 RMB/票', 200);
   await ui.click('保存货代报价');
-  const lcl = ui.memory.freights.find(row => row.agent === '货代乙');
+  const lcl = ui.memory.freights.find(row => row.agent === 'AgentB');
   assert.equal(lcl.transportMode, '海运拼箱');
   assert.equal(lcl.quantity, 2.5);
   assert.equal(lcl.quantityUnit, '公斤');
@@ -615,9 +810,9 @@ test('freight form splits origin/destination and swaps container type for inquir
   assert.equal(lcl.volume, 3);
   assert.equal(lcl.containerType, undefined);
   assert.equal(lcl.route, undefined);
-  const lclText = text(one(all(ui.tree, n => n.type === 'article' && text(n).includes('货代乙')), 'freight record'));
-  assert.match(lclText, /起运地：宁波/);
-  assert.match(lclText, /目的地：洛杉矶/);
+  const lclText = text(one(all(ui.tree, n => n.type === 'article' && text(n).includes('AgentB')), 'freight record'));
+  assert.match(lclText, /起运地：Ningbo/);
+  assert.match(lclText, /目的地：LosAngeles/);
   assert.match(lclText, /询价：2\.5 公斤 · 抛货 3 CBM/);
   await ui.change('运输方式', '空运');
   assert.equal(ui.field('询价单位').props.value, '公斤');
@@ -634,6 +829,31 @@ test('legacy freight records still display a split route and their original basi
   assert.match(row, /起运地：上海/);
   assert.match(row, /目的地：汉堡/);
   assert.match(row, /柜型：20GP \/ 全包/);
+});
+
+test('factory quote stores and displays purity, quality and cargo hazard', async t => {
+  const ui = await mount(t);
+  await ui.click('工厂报价');
+  await ui.change('产品', 'TestProduct');
+  await ui.change('含量 / 纯度', '99.5%');
+  await ui.change('其他关键质量指标', '水分≤0.5%；重金属≤10ppm');
+  await ui.change('货物危险性', 'Class 3 UN1993');
+  await ui.change('报价单价', 100);
+  await ui.change('币种', 'RMB');
+  await ui.change('计价单位', '公斤');
+  await ui.change('退税率 %（不退税填 0）', 13);
+  await ui.click('确认并保存报价');
+  assert.equal(ui.memory.factories[0].purity, '99.5%');
+  assert.equal(ui.memory.factories[0].quality, '水分≤0.5%；重金属≤10ppm');
+  assert.equal(ui.memory.factories[0].hazard, 'Class 3 UN1993');
+  const row = text(ui.article('TestProduct'));
+  assert.match(row, /含量 \/ 纯度：99\.5%/);
+  assert.match(row, /其他关键质量指标：水分≤0\.5%；重金属≤10ppm/);
+  assert.match(row, /货物危险性：Class 3 UN1993/);
+  await ui.click('编辑', ui.article('TestProduct'));
+  assert.equal(ui.field('含量 / 纯度').props.value, '99.5%');
+  assert.equal(ui.field('其他关键质量指标').props.value, '水分≤0.5%；重金属≤10ppm');
+  assert.equal(ui.field('货物危险性').props.value, 'Class 3 UN1993');
 });
 
 test('editing a saved factory uses update and revision, preserves legacy dates/raw and does not append', async t => {
@@ -655,12 +875,56 @@ test('editing a saved factory uses update and revision, preserves legacy dates/r
   assert.ok(ui.button('确认并保存报价'));
 });
 
+test('factory quote defaults to today and an AI period becomes quote date plus that period', async t => {
+  const today = localDate();
+  const parsed = { records: [{ name: 'AIQuote', price: 1200, currency: 'RMB', unit: '吨', rebate: 0, validity: '30 days' }], model: 'test-model' };
+  const ui = await mount(t, {}, [parsed]);
+  await ui.click('工厂报价');
+  assert.equal(ui.field('报价日期').props.value, today, 'a new quote starts on today and stays editable');
+  await ui.change('原始报价 / Excel 表格', 'RMB 1200/ton, validity 30 days');
+  await ui.click('AI 提取字段');
+  assert.equal(ui.field('报价日期').props.value, today, 'a missing quote date keeps the default');
+  assert.equal(ui.field('报价有效期').props.value, addDays(today, 30));
+  assert.ok(all(ui.tree, n => n.type === 'p' && text(n).includes(`+ 30 天计算并填入 ${addDays(today, 30)}`)), 'the computed validity explains its formula');
+  await ui.change('报价日期', '2026-11-17');
+  assert.equal(ui.field('报价有效期').props.value, '2026-12-17', 'changing the quote date moves the derived validity');
+  await ui.click('确认并保存报价');
+  assert.equal(ui.memory.factories[0].quoteDate, '2026-11-17');
+  assert.equal(ui.memory.factories[0].validity, '2026-12-17');
+  assert.equal(ui.field('报价日期').props.value, today, 'the next blank quote defaults to today again');
+});
+
+test('editing the validity directly stops it from following the quote date', async t => {
+  const parsed = { records: [{ name: 'ManualValidity', price: 1200, currency: 'RMB', unit: '吨', rebate: 0, quoteDate: '2026/11/17', validity: 'two weeks' }], model: 'test-model' };
+  const ui = await mount(t, {}, [parsed]);
+  await ui.click('工厂报价');
+  await ui.change('原始报价 / Excel 表格', 'valid two weeks');
+  await ui.click('AI 提取字段');
+  assert.equal(ui.field('报价日期').props.value, '2026-11-17');
+  assert.equal(ui.field('报价有效期').props.value, '2026-12-01');
+  await ui.change('报价有效期', '2027-01-15');
+  await ui.change('报价日期', '2026-12-20');
+  assert.equal(ui.field('报价有效期').props.value, '2027-01-15', 'a manual validity is never overwritten');
+  await ui.click('确认并保存报价');
+  assert.equal(ui.memory.factories[0].quoteDate, '2026-12-20');
+  assert.equal(ui.memory.factories[0].validity, '2027-01-15');
+});
+
+test('rule extraction converts a validity period column from the quote date', async t => {
+  const ui = await mount(t);
+  await ui.click('工厂报价');
+  await ui.change('原始报价 / Excel 表格', '产品\t报价明细\t报价日期\t报价有效期\nProdA\tUSD 20/kg\t2026/11/17\t30 days');
+  await ui.click('规则提取');
+  assert.equal(ui.field('报价日期').props.value, '2026-11-17');
+  assert.equal(ui.field('报价有效期').props.value, '2026-12-17');
+});
+
 test('cancel editing causes no mutation; stale revision shows error and retains editable values', async t => {
   const ui = await mount(t, { factories: [factory('existing')] });
-  await ui.click('编辑', ui.article('报价 existing')); await ui.change('报价单价', '16000');
+  await ui.click('编辑', ui.article('Quote existing')); await ui.change('报价单价', '16000');
   await ui.click('取消编辑');
   assert.equal(ui.requests.filter(r => ['update', 'add', 'delete'].includes(r.action)).length, 0);
-  await ui.click('编辑', ui.article('报价 existing')); await ui.change('报价单价', '17000');
+  await ui.click('编辑', ui.article('Quote existing')); await ui.change('报价单价', '17000');
   ui.memory.revision++; // Another client changes the server snapshot, in memory only.
   await ui.click('保存修改');
   assert.equal(ui.memory.factories[0].price, 14000);
@@ -672,37 +936,118 @@ test('cancel editing causes no mutation; stale revision shows error and retains 
 test('catalog save/search and bring-in drive both forms; CAS autofill clears only generated names', async t => {
   const ui = await mount(t);
   await ui.click('产品目录');
-  await ui.change('产品名称', '二甲基亚砜'); await ui.change('CAS 号', ' 67 – 68 – 5 ');
+  await ui.change('产品名称', 'DMSO'); await ui.change('CAS 号', ' 67 – 68 – 5 ');
   await ui.click('保存产品');
   assert.equal(ui.memory.products[0].cas, '67-68-5');
   assert.equal(ui.requests.find(r => r.kind === 'products').revision, 7);
   await ui.change('搜索产品名称或 CAS', '67-68-5');
-  await ui.click('带入核算', ui.article('二甲基亚砜'));
-  assert.equal(ui.field('产品 / 规格').props.value, '二甲基亚砜');
+  await ui.click('带入核算', ui.article('DMSO'));
+  assert.equal(ui.field('产品 / 规格').props.value, 'DMSO');
   assert.equal(ui.field('CAS 号').props.value, '67-68-5');
   await ui.change('CAS 号', '64-17-5');
   assert.equal(ui.field('产品 / 规格').props.value, '');
   await ui.change('产品 / 规格', '手填规格'); await ui.change('CAS 号', '75-07-0');
   assert.equal(ui.field('产品 / 规格').props.value, '手填规格');
   await ui.change('CAS 号', ' 67–68–5 ');
-  assert.equal(ui.field('产品 / 规格').props.value, '二甲基亚砜');
-  await ui.click('产品目录'); await ui.click('带入工厂', ui.article('二甲基亚砜'));
-  assert.equal(ui.field('产品').props.value, '二甲基亚砜');
+  assert.equal(ui.field('产品 / 规格').props.value, 'DMSO');
+  await ui.click('产品目录'); await ui.click('带入工厂', ui.article('DMSO'));
+  assert.equal(ui.field('产品').props.value, 'DMSO');
   await ui.change('CAS 号', '64-17-5'); assert.equal(ui.field('产品').props.value, '');
   await ui.change('产品', '工厂手填规格'); await ui.change('CAS 号', '75-07-0');
   assert.equal(ui.field('产品').props.value, '工厂手填规格');
 });
 
 test('catalog includes saved quote products and prevents duplicate normalized CAS without writes', async t => {
-  const ui = await mount(t, { factories: [factory('derived', { name: '报价目录产品' })] });
+  const ui = await mount(t, { factories: [factory('derived', { name: 'CatalogProduct' })] });
   await ui.click('产品目录');
-  const derived = ui.article('报价目录产品');
+  const derived = ui.article('CatalogProduct');
   assert.equal(all(derived, n => n.type === 'button' && text(n) === '删除').length, 0);
   await ui.change('产品名称', '重复产品'); await ui.change('CAS 号', '67 – 68 – 5'); await ui.click('保存产品');
   assert.equal(ui.requests.filter(r => r.action === 'add').length, 0);
   assert.ok(all(ui.tree, n => n.props.role === 'alert').length);
   await ui.change('搜索产品名称或 CAS', '不匹配');
   assert.equal(all(ui.tree, n => n.type === 'article').length, 0);
+});
+
+test('editing a catalog product updates name, CAS and rate overrides', async t => {
+  const ui = await mount(t, { products: [{ id: 'manual', name: 'OldProduct', cas: '67-68-5' }] });
+  await ui.click('产品目录');
+  await ui.click('编辑', ui.article('OldProduct'));
+  assert.equal(ui.field('产品名称').props.value, 'OldProduct');
+  assert.equal(ui.field('CAS 号').props.value, '67-68-5');
+  assert.equal(ui.field('增值税率 %').props.value, '');
+  assert.equal(ui.field('退税率 %').props.value, '');
+  await ui.change('产品名称', 'NewProduct');
+  await ui.change('增值税率 %', 9);
+  await ui.change('退税率 %', 4);
+  await ui.click('保存修改');
+  const update = ui.requests.find(r => r.action === 'update' && r.kind === 'products');
+  assert.equal(update.id, 'manual');
+  assert.equal(update.revision, 7);
+  assert.equal(ui.memory.products[0].name, 'NewProduct');
+  assert.equal(ui.memory.products[0].tax, 9);
+  assert.equal(ui.memory.products[0].rebate, 4);
+  assert.equal(ui.field('产品名称').props.value, '');
+  assert.equal(ui.field('增值税率 %').props.value, '');
+});
+
+test('manual catalog product stores cargo hazard and the factory form autofills it by CAS', async t => {
+  const ui = await mount(t);
+  await ui.click('产品目录');
+  await ui.change('产品名称', 'DMSO'); await ui.change('CAS 号', '67-68-5');
+  await ui.change('货物危险性', ' Class 9 UN3082 ');
+  await ui.click('保存产品');
+  assert.equal(ui.memory.products[0].hazard, 'Class 9 UN3082');
+  assert.match(text(ui.article('DMSO')), /货物危险性 Class 9 UN3082/);
+  await ui.click('编辑', ui.article('DMSO'));
+  assert.equal(ui.field('货物危险性').props.value, 'Class 9 UN3082');
+  await ui.change('货物危险性', 'Class 8 UN1814');
+  await ui.click('保存修改');
+  assert.equal(ui.memory.products[0].hazard, 'Class 8 UN1814');
+  await ui.click('编辑', ui.article('DMSO'));
+  await ui.change('货物危险性', '');
+  await ui.click('保存修改');
+  assert.equal(ui.requests.filter(row => row.action === 'update' && row.kind === 'products').at(-1).record.hazard, '', 'clearing the field sends the empty value that removes the catalog override');
+  assert.equal(ui.memory.products[0].hazard, '');
+  await ui.click('工厂报价');
+  await ui.change('CAS 号', ' 67 – 68 – 5 ');
+  assert.equal(ui.field('货物危险性').props.value, '');
+  await ui.change('货物危险性', 'Class 8 UN1814');
+  assert.equal(ui.field('货物危险性').props.value, 'Class 8 UN1814');
+});
+
+test('bringing a catalog product into a factory quote carries its cargo hazard', async t => {
+  const ui = await mount(t, { factories: [factory('derived', { name: 'CatalogProduct', hazard: 'Class 3 UN1993' })] });
+  await ui.click('产品目录');
+  assert.match(text(ui.article('CatalogProduct')), /货物危险性 Class 3 UN1993/);
+  await ui.click('带入工厂', ui.article('CatalogProduct'));
+  assert.equal(ui.field('产品').props.value, 'CatalogProduct');
+  assert.equal(ui.field('货物危险性').props.value, 'Class 3 UN1993');
+  await ui.change('CAS 号', '64-17-5');
+  assert.equal(ui.field('货物危险性').props.value, '', 'a CAS without a catalog hazard clears the generated one');
+  await ui.change('货物危险性', 'Class 8 UN1814');
+  await ui.change('CAS 号', '7732-18-5');
+  assert.equal(ui.field('货物危险性').props.value, 'Class 8 UN1814', 'a manually entered hazard is not cleared');
+  await ui.change('CAS 号', '67 – 68 – 5');
+  assert.equal(ui.field('货物危险性').props.value, 'Class 3 UN1993', 'a catalog CAS replaces it with the catalog hazard');
+});
+
+test('editing a quote-derived product stores a manual override and locks CAS', async t => {
+  const ui = await mount(t, { factories: [factory('derived', { name: 'CatalogProduct' })] });
+  await ui.click('产品目录');
+  await ui.click('编辑', ui.article('CatalogProduct'));
+  assert.equal(ui.field('CAS 号').props.disabled, true);
+  assert.equal(ui.field('增值税率 %').props.value, '');
+  await ui.change('产品名称', 'CatalogOverride');
+  await ui.change('增值税率 %', 10);
+  await ui.click('保存修改');
+  const add = ui.requests.find(r => r.action === 'add' && r.kind === 'products');
+  assert.equal(add.override, true);
+  assert.equal(add.record.name, 'CatalogOverride');
+  assert.equal(add.record.cas, '67-68-5');
+  assert.equal(ui.memory.products[0].name, 'CatalogOverride');
+  assert.ok(ui.article('CatalogOverride'));
+  assert.equal(all(ui.article('CatalogOverride'), n => n.type === 'button' && text(n) === '删除').length, 1);
 });
 
 test('AI empty results clear the previous parsed form and pending queue without writing records', async t => {
@@ -726,37 +1071,56 @@ test('AI empty results clear the previous parsed form and pending queue without 
   assert.ok(all(ui.tree, n => n.props.role === 'status' && text(n).includes('没有从这段内容中识别到报价')).length);
   assert.equal(ui.requests.filter(r => ['add', 'update'].includes(r.action)).length, 0);
   // A subsequent manual save must not resurrect the previous pending second record.
-  await ui.change('产品', '手填新报价'); await ui.change('报价单价', '20');
+  await ui.change('产品', 'ManualQuote'); await ui.change('报价单价', '20');
   await ui.change('计价单位', '公斤'); await ui.change('退税率 %（不退税填 0）', '0');
   await ui.click('确认并保存报价');
   assert.equal(ui.memory.factories.length, 1);
-  assert.equal(ui.memory.factories[0].name, '手填新报价');
+  assert.equal(ui.memory.factories[0].name, 'ManualQuote');
   assert.equal(ui.memory.factories[0].raw, '无法识别的第二批内容');
   assert.equal(ui.field('产品').props.value, '');
 });
 
+test('class/UN hazard formats are extracted into the factory form by rule parsing', async t => {
+  const ui = await mount(t);
+  await ui.change('原始报价 / Excel 表格', 'DPG class 9 UN3082 USD 20/kg FOB 青岛');
+  await ui.click('规则提取');
+  assert.equal(ui.field('货物危险性').props.value, 'class 9 UN3082');
+  await ui.change('原始报价 / Excel 表格', 'DCP class 3 USD 21/kg FOB 上海');
+  await ui.click('规则提取');
+  assert.equal(ui.field('货物危险性').props.value, 'class 3');
+  await ui.change('原始报价 / Excel 表格', 'DMSO UN 1993 USD 22/kg FOB 宁波');
+  await ui.click('规则提取');
+  assert.equal(ui.field('货物危险性').props.value, 'UN 1993');
+});
+
 test('rule extraction advances multiple TSV records one save at a time with per-row raw and current revision', async t => {
   const ui = await mount(t, { factories: [factory('existing')] });
-  await ui.click('编辑', ui.article('报价 existing'));
-  const firstDetails = 'USD 1390/吨 FOB 青岛';
-  const secondDetails = 'USD 2.5/kg FCA 上海';
-  const raw = `产品\tCAS 号\t报价明细\t报价日期\t报价有效期\n产品甲\t67-68-5\t${firstDetails}\t2026/11/01\t2026/12/01\n产品乙\t64-17-5\t${secondDetails}\t2026/11/02\t2026/12/02`;
+  await ui.click('编辑', ui.article('Quote existing'));
+  const firstDetails = 'USD 1390/吨 FOB Qingdao';
+  const secondDetails = 'USD 2.5/kg FCA Shanghai';
+  const raw = `产品\tCAS 号\t报价明细\t报价日期\t报价有效期\t含量 / 纯度\t其他关键质量指标\t货物危险性\nProdA\t67-68-5\t${firstDetails}\t2026/11/01\t2026/12/01\t99.5%\t水分≤0.5%\tClass 3 UN1993\nProdB\t64-17-5\t${secondDetails}\t2026/11/02\t2026/12/02\t98%\t外观：白色粉末\tNonHazardous`;
   await ui.change('原始报价 / Excel 表格', raw); await ui.click('规则提取');
   assert.equal(ui.requests.filter(r => r.action === 'parse').length, 0, 'rule extraction must stay local');
-  assert.equal(ui.field('产品').props.value, '产品甲');
+  assert.equal(ui.field('产品').props.value, 'ProdA');
   assert.equal(ui.field('报价单价').props.value, 1390);
   assert.equal(ui.field('报价日期').props.value, '2026-11-01');
+  assert.equal(ui.field('含量 / 纯度').props.value, '99.5%');
+  assert.equal(ui.field('其他关键质量指标').props.value, '水分≤0.5%');
+  assert.equal(ui.field('货物危险性').props.value, 'Class 3 UN1993');
   await ui.click('确认并保存报价');
   assert.equal(ui.memory.factories.length, 2);
-  assert.equal(ui.field('产品').props.value, '产品乙');
+  assert.equal(ui.field('产品').props.value, 'ProdB');
   assert.equal(ui.field('CAS 号').props.value, '64-17-5');
   assert.equal(ui.field('报价单价').props.value, 2.5);
   assert.equal(ui.field('计价单位').props.value, '公斤');
   assert.equal(ui.field('报价有效期').props.value, '2026-12-02');
+  assert.equal(ui.field('含量 / 纯度').props.value, '98%');
+  assert.equal(ui.field('其他关键质量指标').props.value, '外观：白色粉末');
+  assert.equal(ui.field('货物危险性').props.value, 'NonHazardous');
   await ui.click('确认并保存报价');
   const saves = ui.requests.filter(r => r.action === 'add');
   assert.deepEqual(saves.map(r => r.revision), [7, 8]);
-  assert.deepEqual(saves.map(r => r.record.name), ['产品甲', '产品乙']);
+  assert.deepEqual(saves.map(r => r.record.name), ['ProdA', 'ProdB']);
   assert.deepEqual(saves.map(r => r.record.raw), [firstDetails, secondDetails]);
   assert.equal(ui.requests.filter(r => r.action === 'update').length, 0, 'new parsing must leave edit mode');
   assert.equal(ui.memory.factories.length, 3);
@@ -788,9 +1152,39 @@ test('old history reconstructs freight range and copy falls back to tax rebate a
   await ui.click('核算记录'); await ui.click('查看 / 复制重算', ui.article('旧单值记录'));
   assert.equal(ui.field('最高国际运费 USD/票').props.value, 100);
   assert.equal(ui.field('最低国际运费 USD/票').props.value, 100);
-  assert.equal(ui.button('保存本次核算').props.disabled, false);
+  assert.equal(ui.button('另存为新记录').props.disabled, false);
+  assert.equal(ui.button('覆盖原记录').props.disabled, false);
   assert.equal(ui.memory.history[0].values.rebate, undefined, 'view/copy must not mutate stored history');
   assert.equal(ui.memory.history[1].values.seaMax, undefined);
+});
+
+test('history edit can overwrite the original record or save as a new record', async t => {
+  const values = { product: 'EditableRecord', cas: '67-68-5', qty: 1000, sell: 5, buy: 14, fx: 7, receive: 7,
+    sea: 100, seaMax: 300, local: 0, tax: 13, transport: 0, credit: 0, interest: 0, months: 0 };
+  const result = { base: 2, landed: 2.1, profit: 1000, margin: .1, rmb: 7000, insurance: 0, credit: 0, interest: 0 };
+  const ui = await mount(t, { history: [{ id: 'original', mode: 'rmb', date: '2026-11-01T00:00:00Z', values, result }] });
+  await ui.click('核算记录');
+  await ui.click('查看 / 复制重算', ui.article('EditableRecord'));
+  assert.ok(ui.button('另存为新记录'));
+  assert.ok(ui.button('覆盖原记录'));
+  assert.equal(all(ui.tree, n => n.type === 'button' && text(n) === '保存本次核算').length, 0);
+  await ui.change('对客单价 USD/kg', 6);
+  await ui.click('覆盖原记录');
+  const update = ui.requests.find(r => r.action === 'update' && r.kind === 'history');
+  assert.equal(update.id, 'original');
+  assert.equal(update.revision, 7);
+  assert.equal(update.record.values.sell, 6);
+  assert.equal(ui.memory.history.length, 1);
+  assert.equal(ui.memory.history[0].values.sell, 6);
+  assert.match(text(ui.tree), /已覆盖原核算记录/);
+  await ui.change('对客单价 USD/kg', 7);
+  await ui.click('另存为新记录');
+  const add = ui.requests.find(r => r.action === 'add' && r.kind === 'history');
+  assert.equal(add.record.values.sell, 7);
+  assert.equal(ui.memory.history.length, 2);
+  assert.equal(ui.memory.history.at(-1).values.sell, 7);
+  assert.match(text(ui.tree), /已另存为新的核算记录/);
+  assert.equal(all(ui.tree, n => n.type === 'button' && text(n) === '保存本次核算').length, 1);
 });
 
 test('history page filters by CAS and customer keywords without touching stored records', async t => {

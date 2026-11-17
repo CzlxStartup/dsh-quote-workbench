@@ -8,7 +8,7 @@ function createUI(React, ctx, t, css) {
   // Frequently used fields come first so each page opens on its working set.
   const basicOrder = ['product','cas','customer','qty','sell','transportMode','customerTerm','place','quoteCountry','creditMonths','creditPayment'];
   const calcOrder = ['buy','fx','receive','sea','seaMax','local','tax','rebate','transport','credit','interest','months'];
-  const factoryOrder = ['name','cas','price','currency','tax','rebate','unit','incoterm','port','quoteDate','validity','delivery','factory','quantity','loading','packing','warehouse','portfee','details'];
+  const factoryOrder = ['name','cas','purity','quality','hazard','price','currency','tax','rebate','unit','incoterm','port','quoteDate','validity','delivery','factory','quantity','loading','packing','warehouse','portfee','details'];
   const freightOrder = ['agent','origin','destination','transportMode','containerType','quantity','quantityUnit','bulky','volume','valid','sea','local'];
   const hiddenFreightFields = form => form.transportMode === '海运整柜'
     ? ['quantity','quantityUnit','bulky','volume']
@@ -16,7 +16,13 @@ function createUI(React, ctx, t, css) {
       ? ['containerType', ...(form.bulky === '是' ? [] : ['volume'])]
       : ['containerType','bulky','volume'];
   const range = (a, b, format = fmt) => a === b ? format(a) : `${format(Math.min(a,b))} ～ ${format(Math.max(a,b))}`;
-  const factoryForm = row => ({ ...emptyForm(factoryFields), ...row, quoteDate: normalizeFactoryDate(row?.quoteDate), validity: normalizeFactoryDate(row?.validity) });
+  const factoryForm = (row, derive = true, defaultQuoteDate = true) => {
+    // New quotes default to today and stay editable; a stated period such as "30 days" becomes quoteDate + 30 days.
+    const quoteDate = normalizeFactoryDate(row?.quoteDate) || (defaultQuoteDate ? localDateString() : '');
+    const plan = derive ? factoryValidity(quoteDate, row?.validity) : null;
+    return { ...emptyForm(factoryFields), ...row, quoteDate, validity: normalizeFactoryDate(row?.validity) || plan?.date || '' };
+  };
+  const blankProduct = { name: '', cas: '', hazard: '', tax: null, rebate: null };
   const usableFactory = row => row && ['RMB','USD'].includes(row.currency) && ['吨','公斤'].includes(row.unit) && Number.isFinite(Number(row.price)) && Number(row.price) > 0;
   const timestamp = value => value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString('zh-CN') : '未记录';
   const modeLabels = { rmb: '人民币采购', usd: '美元采购', own: '自有工厂倒推' };
@@ -31,71 +37,123 @@ function createUI(React, ctx, t, css) {
       return Number.isFinite(stored) && stored > 0 ? clampZoom(stored) : 1;
     } catch { return 1; }
   }
-  // The active page is session state: unmounting or switching away must not drop it back to the first tab.
-  const tabStorageKey = 'quote-workbench.tab', tabKeys = ['factory', 'calc', 'freight', 'history', 'products'];
-  function readTab() {
-    try {
-      if (typeof sessionStorage === 'undefined') return 'factory';
-      const stored = sessionStorage.getItem(tabStorageKey);
-      return tabKeys.includes(stored) ? stored : 'factory';
-    } catch { return 'factory'; }
-  }
-  const sessionTab = { value: readTab() };
-  // Each purchase mode keeps its own draft; the memory cache also survives leaving the panel.
-  const calcStorageKey = 'quote-workbench.calc.v1', calcModes = ['rmb', 'usd', 'own'];
+  // Every unsaved page draft shares one session cache and expires five minutes after leaving the panel.
+  const draftStorageKey = 'quote-workbench.drafts.v2', draftTtlMs = 5 * 60 * 1000;
+  const tabKeys = ['factory', 'calc', 'freight', 'history', 'products'];
+  const calcModes = ['rmb', 'usd', 'own'];
   const blankCalc = mode => ({ ...defaults, ...(mode === 'rmb' ? { fx: null } : {}), seaMax: null });
-  function readCalcCache() {
+  function blankCalcCache() {
     const state = { mode: 'rmb', used: {}, drafts: {}, sources: {}, monthsManual: {} };
     for (const mode of calcModes) { state.used[mode] = false; state.monthsManual[mode] = false; state.drafts[mode] = blankCalc(mode); state.sources[mode] = ''; }
-    try {
-      if (typeof sessionStorage === 'undefined') return state;
-      const parsed = JSON.parse(sessionStorage.getItem(calcStorageKey) || 'null');
-      if (!parsed || !calcModes.includes(parsed.mode)) return state;
-      state.mode = parsed.mode;
-      for (const mode of calcModes) {
-        state.used[mode] = parsed.used?.[mode] === true;
-        state.monthsManual[mode] = parsed.monthsManual?.[mode] === true;
-        const draft = parsed.drafts?.[mode];
-        if (draft && typeof draft === 'object' && !Array.isArray(draft)) {
-          state.drafts[mode] = { ...state.drafts[mode], ...draft, customerTerm: draft.customerTerm || '待确认' };
-          // 旧草稿没有手动标记：仍是默认月数时跟随账期，明显自定义过的值保持不变。
-          const restored = state.drafts[mode];
-          if (!state.monthsManual[mode] && Number.isFinite(restored.creditMonths) && (restored.months == null || restored.months === defaults.months)) restored.months = restored.creditMonths;
-        }
-        if (typeof parsed.sources?.[mode] === 'string') state.sources[mode] = parsed.sources[mode];
-      }
-    } catch { /* 缓存损坏或浏览器禁用存储时从空白核算开始 */ }
     return state;
   }
-  const calcCache = readCalcCache();
-  // The factory draft survives leaving the panel, but expires after ten idle minutes.
-  const factoryStorageKey = 'quote-workbench.factory.v1', factoryCacheMs = 10 * 60 * 1000;
-  const blankFactoryCache = () => ({ form: emptyForm(factoryFields), raw: '', pending: [], index: 0, editing: null });
-  function readFactoryCache() {
-    const empty = blankFactoryCache();
-    try {
-      if (typeof sessionStorage === 'undefined') return empty;
-      const parsed = JSON.parse(sessionStorage.getItem(factoryStorageKey) || 'null');
-      if (!parsed || !Number.isFinite(parsed.savedAt) || Date.now() - parsed.savedAt > factoryCacheMs) {
-        sessionStorage.removeItem(factoryStorageKey);
-        return empty;
-      }
-      const form = parsed.form && typeof parsed.form === 'object' && !Array.isArray(parsed.form) ? { ...empty.form, ...parsed.form } : empty.form;
-      const pending = Array.isArray(parsed.pending) ? parsed.pending.filter(row => row && typeof row === 'object' && !Array.isArray(row)) : [];
-      const index = Number.isInteger(parsed.index) && parsed.index >= 0 && parsed.index < Math.max(1, pending.length) ? parsed.index : 0;
-      return { form, raw: typeof parsed.raw === 'string' ? parsed.raw : '', pending, index, editing: typeof parsed.editing === 'string' ? parsed.editing : null };
-    } catch { return empty; }
+  function blankDraft() {
+    return {
+      tab: 'factory',
+      factory: { form: factoryForm(), raw: '', pending: [], index: 0, editing: null },
+      calc: blankCalcCache(),
+      freight: emptyForm(freightFields),
+      product: { ...blankProduct },
+      productEditing: null,
+      catalogSearch: '',
+      historyFilter: { cas: '', customer: '' },
+      selected: [],
+      selectedHistory: [],
+      historySource: null,
+    };
   }
-  function writeFactoryCache(state) {
+  let memoryDraft = null;
+  const isRecord = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  function readDraft() {
+    const empty = blankDraft();
+    let stored = null, canStore = false;
     try {
-      if (typeof sessionStorage === 'undefined') return;
-      sessionStorage.setItem(factoryStorageKey, JSON.stringify({ ...state, savedAt: Date.now() }));
-    } catch { /* 存储不可用时只保留本次页面状态 */ }
+      if (typeof sessionStorage !== 'undefined') {
+        canStore = true;
+        const raw = sessionStorage.getItem(draftStorageKey);
+        if (raw) stored = JSON.parse(raw);
+      }
+    } catch { stored = null; }
+    if (!canStore || !stored) stored = memoryDraft;
+    if (!isRecord(stored) || !Number.isFinite(stored.savedAt) || Date.now() - stored.savedAt > draftTtlMs) {
+      if (canStore) { try { sessionStorage.removeItem(draftStorageKey); } catch { /* 存储不可用 */ } }
+      memoryDraft = null;
+      return empty;
+    }
+    if (tabKeys.includes(stored.tab)) empty.tab = stored.tab;
+
+    const factory = isRecord(stored.factory) ? stored.factory : {};
+    const form = isRecord(factory.form) ? { ...empty.factory.form, ...factory.form } : empty.factory.form;
+    if (!normalizeFactoryDate(form.quoteDate)) form.quoteDate = localDateString();
+    const pending = Array.isArray(factory.pending) ? factory.pending.filter(isRecord) : [];
+    empty.factory = {
+      form,
+      raw: typeof factory.raw === 'string' ? factory.raw : '',
+      pending,
+      index: Number.isInteger(factory.index) && factory.index >= 0 && factory.index < Math.max(1, pending.length) ? factory.index : 0,
+      editing: typeof factory.editing === 'string' ? factory.editing : null,
+    };
+
+    const calc = isRecord(stored.calc) ? stored.calc : {};
+    if (calcModes.includes(calc.mode)) empty.calc.mode = calc.mode;
+    for (const mode of calcModes) {
+      empty.calc.used[mode] = calc.used?.[mode] === true;
+      empty.calc.monthsManual[mode] = calc.monthsManual?.[mode] === true;
+      const draft = isRecord(calc.drafts?.[mode]) ? calc.drafts[mode] : null;
+      if (draft) {
+        empty.calc.drafts[mode] = { ...empty.calc.drafts[mode], ...draft, customerTerm: draft.customerTerm || '待确认' };
+        const restored = empty.calc.drafts[mode];
+        // 旧草稿没有手动标记：仍是默认月数时跟随账期，明显自定义过的值保持不变。
+        if (!empty.calc.monthsManual[mode] && Number.isFinite(restored.creditMonths) && (restored.months == null || restored.months === defaults.months)) restored.months = restored.creditMonths;
+      }
+      if (typeof calc.sources?.[mode] === 'string') empty.calc.sources[mode] = calc.sources[mode];
+    }
+
+    const freight = isRecord(stored.freight) ? stored.freight : {};
+    empty.freight = { ...empty.freight, ...freight };
+    if (!['海运整柜','海运拼箱','空运'].includes(empty.freight.transportMode)) empty.freight.transportMode = '海运整柜';
+    if (!['否','是'].includes(empty.freight.bulky)) empty.freight.bulky = '否';
+    if (!['公斤','吨','CBM','票'].includes(empty.freight.quantityUnit)) empty.freight.quantityUnit = '公斤';
+
+    const product = isRecord(stored.product) ? stored.product : {};
+    empty.product = {
+      name: typeof product.name === 'string' ? product.name : '',
+      cas: typeof product.cas === 'string' ? product.cas : '',
+      hazard: typeof product.hazard === 'string' ? product.hazard : '',
+      tax: Number.isFinite(product.tax) ? product.tax : null,
+      rebate: Number.isFinite(product.rebate) ? product.rebate : null,
+    };
+    const editingProduct = isRecord(stored.productEditing) ? stored.productEditing : null;
+    if (editingProduct && (typeof editingProduct.id === 'string' || typeof editingProduct.cas === 'string' || editingProduct.derived === true)) {
+      empty.productEditing = {
+        id: typeof editingProduct.id === 'string' ? editingProduct.id : null,
+        cas: typeof editingProduct.cas === 'string' ? normalizeCas(editingProduct.cas) : '',
+        derived: editingProduct.derived === true,
+      };
+    }
+
+    empty.catalogSearch = typeof stored.catalogSearch === 'string' ? stored.catalogSearch : '';
+    const filter = isRecord(stored.historyFilter) ? stored.historyFilter : {};
+    empty.historyFilter = { cas: typeof filter.cas === 'string' ? filter.cas : '', customer: typeof filter.customer === 'string' ? filter.customer : '' };
+    empty.selected = Array.isArray(stored.selected) ? stored.selected.filter(id => typeof id === 'string') : [];
+    empty.selectedHistory = Array.isArray(stored.selectedHistory) ? stored.selectedHistory.filter(id => typeof id === 'string') : [];
+    empty.historySource = typeof stored.historySource === 'string' ? stored.historySource : null;
+    return empty;
+  }
+  function writeDraft(draft) {
+    memoryDraft = draft;
+    try {
+      if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(draftStorageKey, JSON.stringify(draft));
+    } catch { /* 存储不可用时只保留内存草稿 */ }
   }
   async function api(input, signal) {
     const response = await fetch('/api/quote-workbench', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal });
     const result = await response.json();
-    if (!response.ok) throw Error(result.error || `HTTP ${response.status}`);
+    if (!response.ok) {
+      const message = result.error || `HTTP ${response.status}`;
+      const stale = ['未知操作', '仅支持更新工厂报价', '仅支持更新工厂报价或产品'].includes(message);
+      throw Error(stale ? '报价工作台服务端仍是旧版本，请完全退出并重启 Harness，或重新启用报价工作台插件后再试。' : message);
+    }
     return result.value;
   }
   function Icon({ size = 20 }) {
@@ -105,39 +163,51 @@ function createUI(React, ctx, t, css) {
     return h('div', { className: className ? `qw-grid ${className}` : 'qw-grid' }, defs.filter(([id]) => !hidden.includes(id)).map(([id, label, type]) => {
       const options = id === 'quoteCountry' ? [['', t('请选择国家 / 地区')], ...creditCountries.map(c => [c.code, `${c.label} · ${c.code}`])] : Array.isArray(type) ? type.map(x => [x, t(x)]) : null;
       const props = { value: value[id] ?? '', disabled: disabled.includes(id), onChange: e => onChange(id, type === 'number' ? e.target.value === '' ? null : Number(e.target.value) : e.target.value) };
-      const classes = [id === 'details' || wide.includes(id) ? 'qw-field-wide' : '', spans[id] ? `qw-span-${spans[id]}` : ''].filter(Boolean).join(' ');
-      return h('label', { key: id, className: classes || undefined }, h('span', null, t(labels[id] || label)), options ? h('select', props, options.map(([key, text]) => h('option', { key, value: key }, text))) : id === 'details' ? h('textarea', { ...props, rows: 3 }) : h('input', { ...props, type, ...(type === 'number' ? { min: 0, step: 'any' } : {}) }));
+      const classes = [id === 'details' || id === 'quality' || wide.includes(id) ? 'qw-field-wide' : '', spans[id] ? `qw-span-${spans[id]}` : ''].filter(Boolean).join(' ');
+      // 结构化单行文本只允许英文/数字/标点；工厂名称可含中文，明细/质量/粘贴原文不受限。
+      const invalid = type === 'text' && id !== 'factory' && id !== 'details' && id !== 'quality' && hasChinese(value[id]);
+      const control = options
+        ? h('select', props, options.map(([key, text]) => h('option', { key, value: key }, text)))
+        : id === 'details' || id === 'quality'
+          ? h('textarea', { ...props, rows: id === 'details' ? 3 : 2 })
+          : h('input', { ...props, type, 'aria-invalid': invalid || undefined, ...(type === 'number' ? { min: 0, step: 'any' } : {}) });
+      return h('label', { key: id, className: classes || undefined }, h('span', null, t(labels[id] || label)), control, invalid && h('span', { className: 'qw-field-error' }, t('不能包含中文')));
     }));
   }
   function App() {
     useSyncExternalStore(fn => ctx.locale.subscribe(fn), () => ctx.locale.getSnapshot());
-    const restoredFactory = useRef(null);
-    if (!restoredFactory.current) restoredFactory.current = readFactoryCache();
-    const restored = restoredFactory.current;
-    const [db, setDb] = useState(null), [tab, setTab] = useState(sessionTab.value), [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [error, setError] = useState('');
-    const [mode, setMode] = useState(calcCache.mode), [v, setV] = useState(calcCache.drafts[calcCache.mode]);
-    const [factory, setFactory] = useState(restored.form), [freight, setFreight] = useState(emptyForm(freightFields));
-    const [raw, setRaw] = useState(restored.raw), [pending, setPending] = useState(restored.pending), [index, setIndex] = useState(restored.index), [selected, setSelected] = useState([]), [source, setSource] = useState(calcCache.sources[calcCache.mode]);
+    const restoredRef = useRef(null);
+    if (!restoredRef.current) restoredRef.current = readDraft();
+    const restored = restoredRef.current, calcCache = restored.calc;
+    const [db, setDb] = useState(null), [tab, setTab] = useState(restored.tab), [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [error, setError] = useState('');
+    const [mode, setMode] = useState(restored.calc.mode), [v, setV] = useState(restored.calc.drafts[restored.calc.mode]);
+    const [factory, setFactory] = useState(restored.factory.form), [freight, setFreight] = useState(restored.freight);
+    const [raw, setRaw] = useState(restored.factory.raw), [pending, setPending] = useState(restored.factory.pending), [index, setIndex] = useState(restored.factory.index), [selected, setSelected] = useState(restored.selected), [selectedHistory, setSelectedHistory] = useState(restored.selectedHistory), [historySource, setHistorySource] = useState(restored.historySource), [source, setSource] = useState(restored.calc.sources[restored.calc.mode]);
     const [parseModel, setParseModel] = useState(null), [parsing, setParsing] = useState(false);
-    const [editing, setEditing] = useState(restored.editing), [product, setProduct] = useState({ name: '', cas: '' }), [catalogSearch, setCatalogSearch] = useState('');
-    const [historyFilter, setHistoryFilter] = useState({ cas: '', customer: '' });
+    const [editing, setEditing] = useState(restored.factory.editing), [product, setProduct] = useState(restored.product), [productEditing, setProductEditing] = useState(restored.productEditing), [catalogSearch, setCatalogSearch] = useState(restored.catalogSearch);
+    const [historyFilter, setHistoryFilter] = useState(restored.historyFilter);
+    const [includeCosting, setIncludeCosting] = useState(true);
     const [zoom, setZoom] = useState(readZoom);
-    const fileInput = useRef(null), lock = useRef(false), autofill = useRef({ calc: { rmb: '', usd: '', own: '' }, factory: '', rates: { rmb: {}, usd: {}, own: {} }, factoryRates: {} }), rootRef = useRef(null);
+    const fileInput = useRef(null), lock = useRef(false), autofill = useRef({ calc: { rmb: '', usd: '', own: '' }, factory: '', factoryHazard: '', rates: { rmb: {}, usd: {}, own: {} }, factoryRates: {}, factoryValidity: null }), rootRef = useRef(null), draftSnapshot = useRef(null);
     const products = db ? catalogProducts(db) : [];
     const sources = db ? db.factories.filter(row => usableFactory(row) && row.currency === ({ rmb: 'RMB', usd: 'USD' })[mode] && (!normalizeCas(v.cas) || normalizeCas(row.cas) === normalizeCas(v.cas))) : [];
     const activeSource = sources.find(row => row.id === source);
     useEffect(() => { if (db && source && !activeSource) setSource(''); }, [db, source, activeSource]);
     useEffect(() => {
       calcCache.mode = mode; calcCache.drafts[mode] = v; calcCache.sources[mode] = source;
-      try { if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(calcStorageKey, JSON.stringify(calcCache)); } catch { /* 内存缓存仍保留本次页面数据 */ }
-    }, [mode, v, source]);
-    const factorySnapshot = useRef(null);
-    useEffect(() => {
-      factorySnapshot.current = { form: factory, raw, pending, index, editing };
-      writeFactoryCache(factorySnapshot.current);
-    }, [factory, raw, pending, index, editing]);
-    // 离开工作台时刷新时间戳；之后 10 分钟内回来仍能恢复，超时才清空。
-    useEffect(() => () => { if (factorySnapshot.current) writeFactoryCache(factorySnapshot.current); }, []);
+      const draft = {
+        tab,
+        factory: { form: factory, raw, pending, index, editing },
+        calc: calcCache,
+        freight, product, productEditing, catalogSearch, historyFilter,
+        selected, selectedHistory, historySource,
+        savedAt: Date.now(),
+      };
+      draftSnapshot.current = draft;
+      writeDraft(draft);
+    }, [tab, mode, v, source, factory, raw, pending, index, editing, freight, product, productEditing, catalogSearch, historyFilter, selected, selectedHistory, historySource]);
+    // 离开工作台时刷新时间戳：之后 5 分钟内回来仍能恢复，超时才清空。
+    useEffect(() => () => { if (draftSnapshot.current) writeDraft({ ...draftSnapshot.current, savedAt: Date.now() }); }, []);
     function casFields(old, value, key, scope) {
       const match = normalizeCas(value) && products.find(row => normalizeCas(row.cas) === normalizeCas(value));
       const marker = scope === 'factory' ? autofill.current.factory : autofill.current.calc[mode];
@@ -145,6 +215,12 @@ function createUI(React, ctx, t, css) {
       if (scope === 'factory') autofill.current.factory = match ? match.name : '';
       else autofill.current.calc[mode] = match ? match.name : '';
       const next = { ...old, cas: value, [key]: name };
+      // 货物危险性跟随目录：有目录值就代入；之前自动代入、新 CAS 没有目录值时清空，手工填写的不覆盖。
+      if (scope === 'factory') {
+        const hazard = match ? String(match.hazard ?? '').trim() : '';
+        if (hazard) { next.hazard = hazard; autofill.current.factoryHazard = hazard; }
+        else if (old.hazard === (autofill.current.factoryHazard ?? '')) { next.hazard = ''; autofill.current.factoryHazard = ''; }
+      }
       // 税率随 CAS 绑定：历史记录有值就代入；之前自动代入但新 CAS 没有数据的，恢复默认，避免串到别的产品。
       const marks = scope === 'factory' ? autofill.current.factoryRates : autofill.current.rates[mode];
       const fallback = scope === 'factory' ? { tax: null, rebate: null } : defaults;
@@ -156,8 +232,24 @@ function createUI(React, ctx, t, css) {
       }
       return next;
     }
+    function loadFactoryForm(row, derive = true, defaultQuoteDate = true) {
+      const form = factoryForm(row, derive, defaultQuoteDate);
+      const plan = factoryValidity(form.quoteDate, row?.validity);
+      autofill.current.factoryValidity = derive ? plan?.duration ?? null : null;
+      setFactory(form);
+      return form;
+    }
     function changeFactory(key, value) {
-      setFactory(old => key === 'cas' ? casFields(old, value, 'name', 'factory') : { ...old, [key]: value });
+      if (key === 'cas') { setFactory(old => casFields(old, value, 'name', 'factory')); return; }
+      if (key === 'validity') { autofill.current.factoryValidity = null; setFactory(old => ({ ...old, validity: value })); return; }
+      if (key === 'quoteDate') {
+        // A validity computed from a stated period follows the quote date until the user edits it directly.
+        const duration = autofill.current.factoryValidity;
+        const derived = duration ? addValidityDate(value, duration) : '';
+        setFactory(old => ({ ...old, quoteDate: value, ...(derived ? { validity: derived } : {}) }));
+        return;
+      }
+      setFactory(old => ({ ...old, [key]: value }));
     }
     function changeFreight(key, value) {
       setFreight(old => key === 'transportMode'
@@ -185,11 +277,11 @@ function createUI(React, ctx, t, css) {
       }
       return record;
     }
-    function resetFactory() { setEditing(null); setPending([]); setIndex(0); setFactory(factoryForm()); setRaw(''); autofill.current.factory = ''; autofill.current.factoryRates = {}; }
-    function editFactory(row) { setEditing(row.id); setPending([]); setIndex(0); setFactory(factoryForm(row)); setRaw(row.raw || ''); autofill.current.factory = ''; autofill.current.factoryRates = {}; setTab('factory'); setMessage(t('正在编辑已保存的报价。')); }
+    function resetFactory() { setEditing(null); setPending([]); setIndex(0); loadFactoryForm(); setRaw(''); autofill.current.factory = ''; autofill.current.factoryHazard = ''; autofill.current.factoryRates = {}; }
+    function editFactory(row) { setEditing(row.id); setPending([]); setIndex(0); loadFactoryForm(row, false, false); setRaw(row.raw || ''); autofill.current.factory = ''; autofill.current.factoryHazard = String(row.hazard ?? '').trim(); autofill.current.factoryRates = {}; setTab('factory'); setMessage(t('正在编辑已保存的报价。')); }
     function acceptParsed(records) {
-      setEditing(null); setPending(records); setIndex(0); autofill.current.factory = ''; autofill.current.factoryRates = {};
-      setFactory(factoryForm(records[0]));
+      setEditing(null); setPending(records); setIndex(0); autofill.current.factory = ''; autofill.current.factoryHazard = ''; autofill.current.factoryRates = {};
+      loadFactoryForm(records[0]);
     }
     useEffect(() => {
       const controller = new AbortController();
@@ -198,11 +290,8 @@ function createUI(React, ctx, t, css) {
         .catch(e => { if (e.name !== 'AbortError') setError(e.message); });
       return () => controller.abort();
     }, []);
+    useEffect(() => { if (historySource && db && !db.history.some(row => row.id === historySource)) setHistorySource(null); }, [historySource, db]);
     useEffect(() => { try { if (typeof localStorage !== 'undefined') localStorage.setItem(zoomStorageKey, String(zoom)); } catch { /* 隐私模式或宿主禁用存储时保持当前缩放 */ } }, [zoom]);
-    useEffect(() => {
-      sessionTab.value = tab;
-      try { if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(tabStorageKey, tab); } catch { /* 内存缓存仍保留本次页面 */ }
-    }, [tab]);
     useEffect(() => {
       if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
       function onKeyDown(event) {
@@ -223,10 +312,17 @@ function createUI(React, ctx, t, css) {
       lock.current = true; setBusy(true); setError(''); setMessage('');
       try { await fn(); } catch (e) { setError(e.message); } finally { lock.current = false; setBusy(false); }
     }
-    async function mutate(input) { const next = await api({ ...input, revision: db.revision }); setDb(next); setSelected([]); setMessage(t('已保存。')); }
+    async function mutate(input) { const next = await api({ ...input, revision: db.revision }); setDb(next); setSelected([]); setSelectedHistory([]); setMessage(t('已保存。')); }
     const button = (text, onClick, extra = {}) => h('button', { type: 'button', disabled: busy, onClick, ...extra }, t(text));
     const note = text => h('p', { className: 'qw-note' }, text);
+    const costingOption = () => h('label', { className: 'qw-check qw-export-option', title: t('同时导出内部成本页') }, h('input', { type: 'checkbox', checked: includeCosting, 'aria-label': t('包含成本数据'), onChange: e => setIncludeCosting(e.target.checked) }), t('包含成本数据'));
     const card = (title, ...children) => h('section', { className: 'qw-card' }, h('div', { className: 'qw-card-head' }, h('h2', null, t(title))), ...children);
+    // 文本字段的中文校验：工厂名称例外，明细/质量等长文本例外。
+    const invalidText = (defs, value) => defs.filter(([id,, type]) => type === 'text' && id !== 'factory' && id !== 'details' && id !== 'quality' && hasChinese(value?.[id]));
+    const assertTextClean = (defs, value) => {
+      const bad = invalidText(defs, value);
+      if (bad.length) throw Error(`以下字段不能包含中文：${bad.map(([, label]) => t(label)).join('、')}。`);
+    };
     function start(next, data = {}, monthsManual = false) {
       if (next !== mode) { calcCache.drafts[mode] = v; calcCache.sources[mode] = source; }
       const values = { ...defaults, ...data, customerTerm: data.customerTerm || '待确认', seaMax: data.seaMax ?? data.sea ?? null, ...(next === 'rmb' ? { fx: data.fx ?? null } : {}) };
@@ -242,6 +338,7 @@ function createUI(React, ctx, t, css) {
       if (next === mode) return;
       calcCache.drafts[mode] = v; calcCache.sources[mode] = source;
       setMode(next); setV(calcCache.drafts[next]); setSource(calcCache.sources[next]);
+      setHistorySource(null);
       setMessage('');
     }
     function change(id, value) {
@@ -264,6 +361,7 @@ function createUI(React, ctx, t, css) {
       const targetMode = keepMode ? mode : nextMode;
       const targetValues = targetMode === mode || !calcCache.used[targetMode] ? v : calcCache.drafts[targetMode];
       const targetManual = targetMode === mode || !calcCache.used[targetMode] ? calcCache.monthsManual[mode] : calcCache.monthsManual[targetMode];
+      if (!keepMode) setHistorySource(null);
       start(targetMode, { ...targetValues, product: row.name || '', cas: normalizeCas(row.cas), buy: Number(row.price) / (row.unit === '吨' ? 1000 : 1), place: row.port || '', rebate: Number.isFinite(rebate) ? rebate : null, ...(quantity ? { qty: quantity } : {}) }, targetManual);
       autofill.current.calc[targetMode] = row.name || '';
       setSource(row.id); setTab('calc'); setMessage(`${t('已自动填入工厂报价的采购单价、退税率、产品和交货地点，报价含明确数量时同步填入数量；请补充运费和汇率。')} ${t('进仓费承担方')}: ${row.warehouse || '待确认'} · ${t('港杂费承担方')}: ${row.portfee || '待确认'}`);
@@ -274,8 +372,35 @@ function createUI(React, ctx, t, css) {
       if (row) useFactory(row, true);
     }
     function remove(kind, row) { if (window.confirm(t('删除这条记录？'))) run(() => mutate({ action: 'delete', kind, id: row.id })); }
+    function matchFactory(values, targetMode) {
+      if (!db || targetMode === 'own') return null;
+      const currency = ({ rmb: 'RMB', usd: 'USD' })[targetMode];
+      if (!currency) return null;
+      const cas = normalizeCas(values?.cas), name = String(values?.product || '').trim();
+      const rows = db.factories.filter(row => usableFactory(row) && row.currency === currency);
+      return rows.find(row => cas && normalizeCas(row.cas) === cas && (!name || row.name === name))
+        || rows.find(row => name && row.name === name)
+        || rows.find(row => cas && normalizeCas(row.cas) === cas)
+        || null;
+    }
+    function factoryForHistory(row) {
+      if (!row) return null;
+      if (row.factorySnapshot && typeof row.factorySnapshot === 'object' && !Array.isArray(row.factorySnapshot)) return row.factorySnapshot;
+      if (row.factoryId) {
+        const found = db?.factories.find(item => item.id === row.factoryId);
+        if (found) return found;
+      }
+      return matchFactory(row.values, row.mode);
+    }
+    function historyValues(row) {
+      const values = { ...row.values, rebate: row.values.rebate ?? (row.mode === 'rmb' ? row.values.tax : row.mode === 'own' ? 0 : null), seaMax: row.values.seaMax ?? row.values.sea };
+      if (row.mode === 'own') values.receive = row.values.seaMax == null ? row.values.fx ?? row.values.receive : row.values.receive ?? row.values.fx;
+      return values;
+    }
     const credit = lookupCreditRate(v.quoteCountry, v.creditMonths, v.creditPayment);
     const ready = validateCalculation(v, mode);
+    const currentFactory = mode === 'own' ? null : activeSource || matchFactory(v, mode);
+    const canExport = ready && Boolean(v.product?.trim()) && (mode === 'own' || Boolean(currentFactory));
     const result = ready ? calculate(v, mode) : null;
     const high = ready && mode !== 'own' ? calculate({ ...v, sea: v.seaMax }, mode) : result;
     const ownHigh = ready && mode === 'own' ? calculate({ ...v, sea: v.seaMax }, 'own') : null;
@@ -334,17 +459,56 @@ function createUI(React, ctx, t, css) {
       return parts;
     }
     async function saveFactory() {
+      assertTextClean(factoryFields, factory);
       const record = { ...factory, cas: normalizeCas(factory.cas), raw: pending.length ? factory.raw || factory.details || raw : raw };
       const original = editing ? db.factories.find(row => row.id === editing) : pending[index];
       for (const key of ['quoteDate','validity']) if (!record[key] && original?.[key] && !normalizeFactoryDate(original[key])) record[key] = original[key];
       await mutate({ action: editing ? 'update' : 'add', kind: 'factories', ...(editing ? { id: editing } : {}), record });
-      if (!editing && index + 1 < pending.length) { setIndex(index + 1); setFactory(factoryForm(pending[index + 1])); }
+      if (!editing && index + 1 < pending.length) { setIndex(index + 1); loadFactoryForm(pending[index + 1]); }
       else resetFactory();
+    }
+    async function saveHistory(overwrite) {
+      assertTextClean(basic, v);
+      const record = { mode, values: v, factoryId: currentFactory?.id ?? null };
+      if (overwrite && historySource) {
+        await mutate({ action: 'update', kind: 'history', id: historySource, record });
+        setMessage('已覆盖原核算记录。');
+      } else {
+        const wasEditing = Boolean(historySource);
+        await mutate({ action: 'add', kind: 'history', record });
+        setHistorySource(null);
+        if (wasEditing) setMessage('已另存为新的核算记录。');
+      }
     }
     async function exportBackup() {
       const data = await api({ action: 'export' });
       const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
       const a = document.createElement('a'); a.href = url; a.download = '报价工作台备份.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+    function downloadQuotation(file) {
+      const binary = atob(file.base64), bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+      const url = URL.createObjectURL(new Blob([bytes], { type: file.mime }));
+      const a = document.createElement('a'); a.href = url; a.download = file.filename; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setMessage(`已生成 ${file.filename}，${includeCosting ? '包含内部成本页' : '仅含客户 Quotation 页'}，可直接编辑并另存为 Excel。`);
+    }
+    async function exportQuotation() {
+      assertTextClean(basic, v);
+      const sourceFactory = mode === 'own' ? null : activeSource || matchFactory(v, mode);
+      if (mode !== 'own' && !sourceFactory) throw Error('请先在 01 选择对应工厂报价');
+      const file = await api({ action: 'quotation', includeCosting, items: [{ mode, values: v, ...(sourceFactory ? { factoryId: sourceFactory.id, factory: sourceFactory } : {}) }] });
+      downloadQuotation(file);
+    }
+    async function exportSelectedHistory() {
+      const rows = db.history.filter(row => selectedHistory.includes(row.id));
+      if (!rows.length) throw Error('请先勾选要合并的核算记录');
+      const items = rows.map(row => {
+        const factory = factoryForHistory(row);
+        return { mode: row.mode, values: historyValues(row), ...(factory ? { factory, ...(factory.id ? { factoryId: factory.id } : {}) } : {}) };
+      });
+      const file = await api({ action: 'quotation', includeCosting, items });
+      downloadQuotation(file);
     }
     async function importBackup(e) {
       const file = e.target.files[0]; e.target.value = ''; if (!file) return;
@@ -356,6 +520,7 @@ function createUI(React, ctx, t, css) {
           h('h3', null, row.name, h('span', { className: 'qw-price' }, `${fmt(row.price)} ${row.currency}/${row.unit}`)),
           h('p', { className: 'qw-item-meta' }, `${row.factory || '—'} · ${row.incoterm} ${row.port || ''} · 增值税率 ${row.tax ?? '—'}% · ${t('退税率')} ${row.rebate ?? '—'}%`),
           h('p', { className: 'qw-item-meta' }, `CAS ${row.cas || '未记录'} · 报价日期 ${row.quoteDate || '未记录'} · 有效至 ${row.validity || '未记录'}`),
+          h('p', { className: 'qw-item-meta' }, `含量 / 纯度：${row.purity || '—'} · 其他关键质量指标：${row.quality || '—'} · 货物危险性：${row.hazard || '—'}`),
           h('p', { className: 'qw-item-meta' }, `进仓费承担方：${row.warehouse || '待确认'} · 港杂费承担方：${row.portfee || '待确认'}`),
           h('p', { className: 'qw-item-meta' }, `保存时间 ${timestamp(row.createdAt)} · 最后修改 ${timestamp(row.updatedAt)}`),
           h('details', { className: 'qw-details' }, h('summary', null, t('完整报价明细')),
@@ -377,18 +542,23 @@ function createUI(React, ctx, t, css) {
         h('div', { className: 'qw-item-actions' }, button('删除', () => remove('freights', row))));
     }
     function historyRow(row) {
-      const a = row.result, values = { ...row.values, rebate: row.values.rebate ?? (row.mode === 'rmb' ? row.values.tax : row.mode === 'own' ? 0 : null) };
+      const a = row.result, values = historyValues(row);
       const b = row.highFreightResult || (Number.isFinite(values.seaMax) && values.seaMax > values.sea ? calculate({ ...values, sea: values.seaMax }, row.mode) : a);
-      const legacyOwn = row.mode === 'own' && row.values.seaMax == null;
-      const copyValues = { ...row.values, rebate: row.values.rebate ?? (row.mode === 'rmb' ? row.values.tax : row.mode === 'own' ? 0 : null), ...(legacyOwn ? { receive: row.values.fx ?? row.values.receive } : {}) };
+      const copyValues = values;
+      const historyFactory = factoryForHistory(row);
+      const factoryName = historyFactory?.factory || (row.mode === 'own' ? 'Own factory' : '未匹配工厂');
       return h('article', { key: row.id, className: 'qw-item' },
         h('div', { className: 'qw-item-main' },
           h('h3', null, row.values.product, h('span', { className: 'qw-price' }, `${fmt(row.values.qty)} kg · USD ${fmt(row.values.sell)}/kg`)),
           h('p', { className: 'qw-item-meta' }, `${timestamp(row.date)} · 客户 ${row.values.customer || '未记录'} · CAS ${row.values.cas || '未记录'} · ${row.values.transportMode || '—'} · 对客条款 ${row.values.customerTerm || '待确认'}`),
+          h('p', { className: 'qw-item-meta' }, `工厂 ${factoryName} · ${row.values.place || '地点未记录'}`),
           row.mode === 'own'
             ? h('p', { className: 'qw-item-meta' }, `${t('人民币含税倒推价 RMB/kg')}: ${range(a.rmb,b.rmb)}`)
             : h('p', { className: 'qw-item-meta' }, `${t('预计利润 USD')}: ${range(a.profit,b.profit)} · ${t('采购成本利润率')}: ${range(a.margin,b.margin,n => `${fmt(n*100)}%`)}`)),
-        h('div', { className: 'qw-item-actions' }, button('查看 / 复制重算', () => { start(row.mode, copyValues, copyValues.months != null && Number.isFinite(copyValues.creditMonths) && copyValues.months !== copyValues.creditMonths); setTab('calc'); }), button('删除', () => remove('history', row))));
+        h('div', { className: 'qw-item-actions' },
+          h('label', { className: 'qw-check qw-history-check', title: t('选择这条核算记录') }, h('input', { type: 'checkbox', checked: selectedHistory.includes(row.id), 'aria-label': `${t('选择')} ${row.values.product}`, onChange: e => setSelectedHistory(old => e.target.checked ? [...old, row.id] : old.filter(id => id !== row.id)) }), t('选择')),
+          button('查看 / 复制重算', () => { start(row.mode, copyValues, copyValues.months != null && Number.isFinite(copyValues.creditMonths) && copyValues.months !== copyValues.creditMonths); setHistorySource(row.id); if (row.factoryId) setSource(row.factoryId); setTab('calc'); }),
+          button('删除', () => remove('history', row))));
     }
     function pageFactory() {
       return h('div', { className: 'qw-body qw-factory' },
@@ -408,12 +578,16 @@ function createUI(React, ctx, t, css) {
             button('规则提取', () => run(async () => { const records = parseQuotes(raw); acceptParsed(records); setMessage(records.length ? `规则已提取 ${records.length} 条报价，请核对字段；多价格和不明确的计价单位需手动确认。` : '没有识别到报价，请先粘贴报价文本。'); })),
             pending.length > 0 && h('span', { className: 'qw-note' }, `${index + 1} / ${pending.length}`)),
           editing && note('正在编辑已保存的报价；保存修改将保留原创建时间。'),
-          h(Fields, { defs: ordered(factoryFields, factoryOrder), value: factory, onChange: changeFactory }),
+          h(Fields, { defs: ordered(factoryFields, factoryOrder), value: factory, onChange: changeFactory, wide: ['quality'] }),
           ['quoteDate','validity'].map(key => {
             const original = editing ? db.factories.find(row => row.id === editing)?.[key] : pending[index]?.[key];
-            return original && !normalizeFactoryDate(original) ? h('p', { key, className: 'qw-note' }, `${key === 'validity' ? '原有效期' : '原报价日期'}：${original}（未填入新日期时保留原文）`) : null;
+            if (!original || normalizeFactoryDate(original)) return null;
+            if (key === 'quoteDate') return h('p', { key, className: 'qw-note' }, `原报价日期：${original}（未填入新日期时保留原文）`);
+            const plan = factoryValidity(factory.quoteDate, original);
+            return h('p', { key, className: 'qw-note' }, plan && factory.validity === plan.date
+              ? `原有效期：${original}（已按报价日期 ${factory.quoteDate} + ${plan.label}计算并填入 ${plan.date}）`
+              : `原有效期：${original}（未填入新日期时保留原文）`);
           }),
-          note('离开工作台后，未保存的报价草稿保留 10 分钟；超过 10 分钟未操作则清空。'),
           h('div', { className: 'qw-form-foot' },
             button(editing ? '保存修改' : '确认并保存报价', () => run(saveFactory), { className: 'qw-primary' }),
             editing && button('取消编辑', () => { resetFactory(); setMessage(''); }),
@@ -422,33 +596,54 @@ function createUI(React, ctx, t, css) {
           h('div', { className: 'qw-card-head' }, h('h2', null, t('已保存的工厂报价')), h('span', { className: 'qw-badge' }, db.factories.length)),
           h('div', { className: 'qw-list-body' }, db.factories.map(factoryRow), db.factories.length ? null : note('暂无工厂报价'))));
     }
+    function editProduct(row) {
+      const own = row.id ? db.products.find(item => item.id === row.id) : null;
+      setProductEditing({ id: own?.id ?? null, cas: normalizeCas(own?.cas ?? row.cas), derived: !own });
+      setProduct({ name: own?.name ?? row.name, cas: own?.cas ?? row.cas, hazard: own?.hazard ?? row.hazard ?? '', tax: own && Number.isFinite(own.tax) ? own.tax : null, rebate: own && Number.isFinite(own.rebate) ? own.rebate : null });
+      setMessage('');
+    }
+    function cancelProductEdit() { setProductEditing(null); setProduct(blankProduct); }
+    async function saveProduct() {
+      assertTextClean(productFields, product);
+      const record = { name: product.name.trim(), cas: normalizeCas(product.cas) };
+      if (!record.name || !/^\d{2,7}-\d{2}-\d$/.test(record.cas)) throw Error('请填写产品名称和 CAS 号，格式如 67-68-5。');
+      const hazard = String(product.hazard ?? '').trim();
+      // 编辑时也发送空值，才能清除目录覆盖并恢复按报价自动取值。
+      if (hazard || productEditing) record.hazard = hazard;
+      for (const key of ['tax', 'rebate']) record[key] = product[key] === null || product[key] === '' ? null : Number(product[key]);
+      const originalCas = productEditing ? normalizeCas(productEditing.cas) : null;
+      if (products.some(row => normalizeCas(row.cas) === record.cas && normalizeCas(row.cas) !== originalCas)) throw Error('该 CAS 号已在目录中。');
+      if (productEditing?.id) await mutate({ action: 'update', kind: 'products', id: productEditing.id, record });
+      else await mutate({ action: 'add', kind: 'products', record, ...(productEditing?.derived ? { override: true } : {}) });
+      setProductEditing(null); setProduct(blankProduct);
+    }
     function pageProducts() {
       const query = catalogSearch.trim().toLowerCase(), casQuery = normalizeCas(query);
       const rows = products.filter(row => row.name.toLowerCase().includes(query) || (casQuery && normalizeCas(row.cas).includes(casQuery)));
       return h('div', { className: 'qw-body qw-factory' },
         h('section', { className: 'qw-card qw-form' },
-          h('div', { className: 'qw-card-head' }, h('h2', null, t('新增产品'))),
-          h(Fields, { defs: [['name','产品名称','text'],['cas','CAS 号','text']], value: product, onChange: (key,value) => setProduct(old => ({ ...old, [key]: value })) }),
-          h('div', { className: 'qw-form-foot' }, button('保存产品', () => run(async () => {
-            const record = { name: product.name.trim(), cas: normalizeCas(product.cas) };
-            if (!record.name || !/^\d{2,7}-\d{2}-\d$/.test(record.cas)) throw Error('请填写产品名称和 CAS 号，格式如 67-68-5。');
-            if (products.some(row => normalizeCas(row.cas) === record.cas)) throw Error('该 CAS 号已在目录中。');
-            await mutate({ action: 'add', kind: 'products', record }); setProduct({ name: '', cas: '' });
-          }), { className: 'qw-primary' })),
-          note('目录同时包含手工产品及已保存报价中的产品；增值税率/退税率取该 CAS 最近一次核算。来自报价的产品不可在目录直接删除。')),
+          h('div', { className: 'qw-card-head' }, h('h2', null, t(productEditing ? '编辑产品' : '新增产品'))),
+          h(Fields, { defs: productFields, value: product, onChange: (key,value) => setProduct(old => ({ ...old, [key]: value })), disabled: productEditing?.derived ? ['cas'] : [] }),
+          h('div', { className: 'qw-form-foot' },
+            button(productEditing ? '保存修改' : '保存产品', () => run(saveProduct), { className: 'qw-primary' }),
+            productEditing && button('取消编辑', cancelProductEdit)),
+          note(productEditing?.derived ? '来自报价的产品：CAS 已锁定；货物危险性、税率留空时继续按报价/核算自动取值，填写后以目录设置为准。' : '货物危险性留空时按该 CAS 最近一次工厂报价自动取值；税率留空时按核算或工厂报价自动取值；填写后以目录设置为准。'),
+          note('目录同时包含手工产品及已保存报价中的产品；编辑来自报价的产品会保存一条目录覆盖，删除覆盖后恢复报价名称和货物危险性。')),
         h('section', { className: 'qw-card qw-list' },
           h('div', { className: 'qw-card-head' }, h('h2', null, t('产品目录')), h('span', { className: 'qw-badge' }, `${rows.length} / ${products.length}`)),
           h('input', { type: 'search', value: catalogSearch, onChange: e => setCatalogSearch(e.target.value), placeholder: t('搜索产品名称或 CAS'), 'aria-label': t('搜索产品名称或 CAS') }),
           h('div', { className: 'qw-list-body' }, rows.map(row => h('article', { className: 'qw-item', key: row.id || row.cas },
-            h('div', { className: 'qw-item-main' }, h('h3', null, row.name), h('p', { className: 'qw-item-meta' }, `CAS ${row.cas}${Number.isFinite(row.tax) ? ` · 增值税率 ${row.tax}%` : ''}${Number.isFinite(row.rebate) ? ` · 退税率 ${row.rebate}%` : ''}`), row.manualIndex === undefined && note('来自已保存报价')),
+            h('div', { className: 'qw-item-main' }, h('h3', null, row.name), h('p', { className: 'qw-item-meta' }, `CAS ${row.cas}${row.hazard ? ` · 货物危险性 ${row.hazard}` : ''}${Number.isFinite(row.tax) ? ` · 增值税率 ${row.tax}%` : ''}${Number.isFinite(row.rebate) ? ` · 退税率 ${row.rebate}%` : ''}`), row.manualIndex === undefined && note('来自已保存报价')),
             h('div', { className: 'qw-item-actions' },
+              button('编辑', () => editProduct(row)),
               button('带入核算', () => {
                 setV(old => ({ ...old, product: row.name, cas: row.cas, ...(Number.isFinite(row.tax) ? { tax: row.tax } : {}), ...(Number.isFinite(row.rebate) ? { rebate: row.rebate } : {}) }));
                 autofill.current.calc[mode] = row.name; autofill.current.rates[mode] = {}; calcCache.used[mode] = true; setSource(''); setTab('calc');
               }),
               button('带入工厂', () => {
-                setFactory(old => ({ ...old, name: row.name, cas: row.cas, ...(Number.isFinite(row.tax) ? { tax: row.tax } : {}), ...(Number.isFinite(row.rebate) ? { rebate: row.rebate } : {}) }));
-                autofill.current.factory = row.name; autofill.current.factoryRates = {}; setTab('factory');
+                const hazard = String(row.hazard ?? '').trim();
+                setFactory(old => ({ ...old, name: row.name, cas: row.cas, hazard, ...(Number.isFinite(row.tax) ? { tax: row.tax } : {}), ...(Number.isFinite(row.rebate) ? { rebate: row.rebate } : {}) }));
+                autofill.current.factory = row.name; autofill.current.factoryHazard = hazard; autofill.current.factoryRates = {}; setTab('factory');
               }),
               row.manualIndex !== undefined && button('删除', () => remove('products', row))))), !rows.length && note('没有符合条件的产品。'))));
     }
@@ -460,7 +655,7 @@ function createUI(React, ctx, t, css) {
           card('新增货代报价',
             h(Fields, { defs: ordered(freightFields, freightOrder), value: freight, onChange: changeFreight, hidden: hiddenFreightFields(freight), className: 'qw-freight-form' }),
             note(isLcl ? '拼箱询价单位默认按重量；如为抛货，请选择「是」并填写体积（CBM）。' : '整柜只需选择柜型；拼箱 / 空运需填写询价数量和单位。'),
-            h('div', { className: 'qw-form-foot' }, button('保存货代报价', () => run(async () => { await mutate({ action: 'add', kind: 'freights', record: freightRecord(freight) }); setFreight(emptyForm(freightFields)); }), { className: 'qw-primary' }))),
+            h('div', { className: 'qw-form-foot' }, button('保存货代报价', () => run(async () => { assertTextClean(freightFields, freight); await mutate({ action: 'add', kind: 'freights', record: freightRecord(freight) }); setFreight(emptyForm(freightFields)); }), { className: 'qw-primary' }))),
           card('货代报价比较',
             note(`已选 ${selected.length} 家 · 请选择同起运地、同目的地、同运输方式、同柜型或同询价数量（抛货含体积），且有效期内的报价。`),
             selected.length > 0 && !avg && note('已选报价存在口径不一致、过期或数据不完整，无法计算均值。'),
@@ -476,12 +671,30 @@ function createUI(React, ctx, t, css) {
     function pageHistory() {
       const filtering = Boolean(historyFilter.cas.trim() || historyFilter.customer.trim());
       const rows = db.history.filter(row => historyMatches(row, historyFilter));
+      const selectedRows = db.history.filter(row => selectedHistory.includes(row.id));
+      const customers = [...new Set(selectedRows.map(row => String(row.values.customer || '').trim()).filter(Boolean))];
+      const sameCustomer = selectedRows.length > 0 && customers.length === 1 && selectedRows.every(row => String(row.values.customer || '').trim());
+      const missingFactories = selectedRows.filter(row => row.mode !== 'own' && !factoryForHistory(row));
+      const canMerge = selectedRows.length > 0 && sameCustomer && missingFactories.length === 0;
+      const mergeHint = !selectedRows.length
+        ? '勾选同一客户的核算记录后，可合并输出一张报价单。'
+        : !sameCustomer
+          ? '只能合并同一客户的记录；请检查所选记录的客户名称。'
+          : missingFactories.length
+            ? `以下记录缺少对应工厂报价：${missingFactories.map(row => row.values.product).join('、')}`
+            : `已选 ${selectedRows.length} 条 · ${customers[0]} · 将合并为一张报价单。`;
       return h('div', { className: 'qw-body qw-single' },
         card('核算记录',
           h('div', { className: 'qw-filters' },
             h('label', { className: 'qw-filter' }, h('span', null, t('CAS 关键词')), h('input', { type: 'search', value: historyFilter.cas, onChange: e => setHistoryFilter(old => ({ ...old, cas: e.target.value })), placeholder: t('如 67-68 或 6768'), 'aria-label': t('按 CAS 筛选核算记录') })),
             h('label', { className: 'qw-filter' }, h('span', null, t('客户名称关键词')), h('input', { type: 'search', value: historyFilter.customer, onChange: e => setHistoryFilter(old => ({ ...old, customer: e.target.value })), placeholder: t('如 STIM'), 'aria-label': t('按客户名称筛选核算记录') })),
             filtering && button('清除筛选', () => setHistoryFilter({ cas: '', customer: '' }))),
+          h('div', { className: 'qw-history-actions' },
+            button('全选当前结果', () => setSelectedHistory(rows.map(row => row.id)), { disabled: busy || !rows.length }),
+            selectedHistory.length > 0 && button('清除选择', () => setSelectedHistory([])),
+            costingOption(),
+            button('合并输出报价单', () => run(exportSelectedHistory), { className: 'qw-primary', disabled: busy || !canMerge })),
+          h('p', { className: 'qw-note' }, mergeHint),
           h('p', { className: 'qw-note' }, filtering ? `显示 ${rows.length} / ${db.history.length} 条记录；两项同时填写时须同时满足，均为包含关键词匹配。` : `共 ${db.history.length} 条记录；可按 CAS 或客户名称关键词筛选。`),
           rows.length ? rows.map(historyRow) : note(filtering ? '没有符合 CAS 或客户名称关键词的核算记录。' : '暂无核算记录')));
     }
@@ -489,7 +702,9 @@ function createUI(React, ctx, t, css) {
       const pick = (defs, ids) => ids.map(id => defs.find(([key]) => key === id)).filter(Boolean);
       const section = (title, ...children) => h('div', { className: 'qw-section' }, h('h3', null, t(title)), ...children);
       const productFields = pick([...basic, ...costs], ['product', 'cas', 'tax', 'rebate']);
-      const costFields = pick([...basic, ...costs], ['qty', 'buy', 'fx', 'receive', 'sea', 'seaMax', 'local']);
+      const factoryField = ['factory', '工厂', 'text'];
+      const costFields = [factoryField, ...pick([...basic, ...costs], ['qty', 'buy', 'fx', 'receive', 'sea', 'seaMax', 'local'])];
+      const costValues = { ...v, factory: currentFactory?.factory || '' };
       const customerFields = pick(basic, ['customer', 'quoteCountry', 'sell', 'transportMode', 'customerTerm', 'place']);
       const rateFields = pick([...basic, ...params], ['creditMonths', 'creditPayment', 'transport', 'credit', 'interest', 'months']);
       const monthsNote = note('资金占用月数默认同账期，可手动修改；手动修改后不再随账期变化。');
@@ -509,11 +724,11 @@ function createUI(React, ctx, t, css) {
               h('div', { className: 'qw-source' },
                 h('select', { 'aria-label': t('选取工厂报价'), value: activeSource ? source : '', disabled: !sources.length, onChange: e => selectFactory(e.target.value) },
                   h('option', { value: '' }, t(sources.length ? '请选择已保存的工厂报价' : normalizeCas(v.cas) ? '暂无该 CAS 的可用工厂报价' : '暂无可用的工厂报价')),
-                  sources.map(row => h('option', { key: row.id, value: row.id }, `${row.name} · ${row.factory || '未填写工厂'} · ${row.incoterm || '待确认'} ${row.port || ''} · 报价日期 ${row.quoteDate || '未记录'} · 有效至 ${row.validity || '未记录'} · ${row.price} ${row.currency}/${row.unit}`))),
+                  sources.map(row => h('option', { key: row.id, value: row.id }, `${row.name}${row.purity ? `（${row.purity}）` : ''} · ${row.factory || '未填写工厂'} · ${row.incoterm || '待确认'} ${row.port || ''} · 报价日期 ${row.quoteDate || '未记录'} · 有效至 ${row.validity || '未记录'} · ${row.price} ${row.currency}/${row.unit}`))),
                 button('带入成本', () => useFactory(activeSource, true), { disabled: busy || !activeSource })),
-              activeSource && note(`工厂条款 ${activeSource.incoterm || '待确认'} · ${activeSource.port || '地点未记录'} · 进仓费承担方 ${activeSource.warehouse || '待确认'} · 港杂费承担方 ${activeSource.portfee || '待确认'}`)),
+              activeSource && note(`含量 / 纯度 ${activeSource.purity || '—'} · 其他关键质量指标 ${activeSource.quality || '—'} · 货物危险性 ${activeSource.hazard || '—'} · 工厂条款 ${activeSource.incoterm || '待确认'} · ${activeSource.port || '地点未记录'} · 进仓费承担方 ${activeSource.warehouse || '待确认'} · 港杂费承担方 ${activeSource.portfee || '待确认'}`)),
             section('02 / 工厂与运输成本',
-              h(Fields, { defs: costFields, value: v, onChange: change, className: 'qw-3col', hidden: mode === 'rmb' ? ['receive'] : [], labels: { buy: mode === 'rmb' ? '含税采购单价 RMB/kg' : '采购单价 USD/kg', fx: mode === 'rmb' ? '收汇汇率 RMB/USD' : '买汇 / 成本汇率 RMB/USD', sea: '最低国际运费 USD/票' } }),
+              h(Fields, { defs: costFields, value: costValues, onChange: change, className: 'qw-3col', disabled: ['factory'], hidden: mode === 'rmb' ? ['receive'] : [], labels: { buy: mode === 'rmb' ? '含税采购单价 RMB/kg' : '采购单价 USD/kg', fx: mode === 'rmb' ? '收汇汇率 RMB/USD' : '买汇 / 成本汇率 RMB/USD', sea: '最低国际运费 USD/票' } }),
               note('国内费用填写我方承担的完整总额，避免重复计入货代报价。')),
             section('03 / 对客户报价',
               h(Fields, { defs: customerFields, value: v, onChange: change, className: 'qw-3col' })),
@@ -521,18 +736,29 @@ function createUI(React, ctx, t, css) {
               h(Fields, { defs: rateFields, value: v, onChange: change, className: 'qw-3col' }),
               monthsNote)
           ];
+      const exportHint = !ready ? '补全核算后可输出。' : !v.product?.trim() ? '请先填写产品名称。' : mode !== 'own' && !currentFactory ? '请先在 01 选择对应工厂报价。' : '生成英文 Quotation 和内部 Costing 工作表，可直接编辑。';
       return h('div', { className: 'qw-body qw-calc' },
         h('section', { className: 'qw-card qw-form' },
-          h('div', { className: 'qw-card-head' }, h('h2', null, t('报价核算')), button('载入 Excel 样例', () => start(mode, samples[mode]))),
+          h('div', { className: 'qw-card-head' }, h('h2', null, t('报价核算')), button('载入 Excel 样例', () => { setHistorySource(null); start(mode, samples[mode]); })),
           h('div', { className: 'qw-modes' }, ...[['rmb','人民币采购'],['usd','美元采购'],['own','自有工厂倒推']].map(([key,label]) => button(label, () => switchMode(key), { key, 'aria-pressed': mode === key }))),
           ...sections,
           h('div', { className: 'qw-form-foot' }, credit ? note(`${credit.group} 类 · ${credit.period} · 表列 ${credit.rate.toFixed(3)}%（2026–2027.6 费率表）`) : note(v.quoteCountry && v.creditPayment && v.creditMonths != null ? '当前国家、账期和付款方式没有匹配的信保费率，请核对条件或手动填写费率；不可按 0 处理。' : '选择国家、账期和付款方式自动带出信保费率，或直接手填；账期按每月 30 天计算。'))),
         h('section', { className: 'qw-card qw-results' },
           h('div', { className: 'qw-card-head' }, h('h2', null, t('本次核算')), h('span', { className: 'qw-badge' }, t(modeLabels[mode]))),
+          h('div', { className: 'qw-export-bar' },
+            button('输出报价单', () => run(exportQuotation), {
+              className: 'qw-primary qw-export-button',
+              disabled: busy || !canExport,
+              title: canExport ? '生成可编辑的英文 Excel 报价单' : exportHint,
+            }),
+            costingOption(),
+            note(exportHint)),
           h('div', { className: 'qw-results-body' }, ...results()),
           h('div', { className: 'qw-results-foot' },
-            button('保存本次核算', () => run(() => mutate({ action: 'add', kind: 'history', record: { mode, values: v } })), { className: 'qw-primary', disabled: busy || !ready || !v.product?.trim() }),
-            note('沿用原工作台的保险、资金利息及倒推公式。'))));
+            historySource && note('正在编辑历史记录：可另存为新记录，或覆盖原记录。'),
+            button(historySource ? '另存为新记录' : '保存本次核算', () => run(() => saveHistory(false)), { className: 'qw-primary', disabled: busy || !ready || !v.product?.trim() }),
+            historySource && button('覆盖原记录', () => run(() => saveHistory(true)), { disabled: busy || !ready || !v.product?.trim() }),
+            note('沿用原工作台的保险、资金利息及倒推公式；导出的工作簿包含英文 Quotation 和内部 Costing 两个可编辑工作表。'))));
     }
     let body;
     if (!db) body = h('div', { className: 'qw-body qw-single' }, card('报价工作台', note('正在加载报价记录…')));
@@ -556,7 +782,7 @@ function createUI(React, ctx, t, css) {
       h('nav', { className: 'qw-tabs', 'aria-label': t('报价工作台') }, ...[['factory','工厂报价'],['calc','报价核算'],['freight','货代报价'],['history','核算记录'],['products','产品目录']].map(([key,label]) => button(label, () => { setTab(key); setMessage(''); }, { key, 'aria-current': tab === key ? 'page' : undefined }))),
       (error || message) && h('div', { className: 'qw-alerts' }, error && h('p', { className: 'qw-error', role: 'alert' }, error), message && h('p', { className: 'qw-status', role: 'status' }, message)),
       body,
-      h('p', { className: 'qw-foot-note' }, t('记录保存在 Harness 中；支持导入原工作台的 JSON 备份。'))));
+      h('p', { className: 'qw-foot-note' }, t('记录保存在 Harness 中；未保存的草稿在离开工作台后保留 5 分钟，超过 5 分钟未操作则清空。支持导入原工作台的 JSON 备份。'))));
   }
   function Settings() {
     useSyncExternalStore(fn => ctx.locale.subscribe(fn), () => ctx.locale.getSnapshot());

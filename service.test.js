@@ -39,7 +39,14 @@ test('saved history is recomputed and read-only actions do not change revision',
   const ownNext = await service.execute({ action: 'add', kind: 'history', revision: 2, record: { mode: 'own', values: ownValues } });
   assert.deepEqual(ownNext.history[0].result, ownPreview.result);
   assert.deepEqual(ownNext.history[0].highFreightResult, ownPreview.highFreightResult);
-  assert.equal((await service.execute({ action: 'export' })).revision, 3);
+  const original = ownNext.history[0];
+  const edited = await service.execute({ action: 'update', kind: 'history', id: original.id, revision: 3, record: { mode: 'own', values: { ...ownValues, sell: ownValues.sell + 1 } } });
+  assert.equal(edited.history[0].id, original.id);
+  assert.equal(edited.history[0].values.sell, ownValues.sell + 1);
+  assert.equal(edited.history[0].date, original.date);
+  assert.notDeepEqual(edited.history[0].result, original.result);
+  assert.equal(edited.revision, 4);
+  assert.equal((await service.execute({ action: 'export' })).revision, 4);
 });
 test('persistence failure returns an error without claiming a successful change', async () => {
   const data = { revision: 0, factories: [], freights: [], history: [] };
@@ -97,13 +104,19 @@ test('saving settings validates the provider and persists the selection', async 
   assert.equal(fallback.settings, null);
 });
 test('sanitizer drops unknown fields, tolerates summaries and keeps multiple quotes', async () => {
-  const records = sanitizeQuoteRecords('说明文字\n[{"name":"A","price":2.5,"unit":"公斤","extra":"drop"},{"name":"B","price":null,"rebate":"13","tax":"9"}]\n结束', '原文');
-  assert.equal(records.length, 2);
+  const records = sanitizeQuoteRecords('说明文字\n[{"name":"A","price":2.5,"unit":"公斤","purity":" 99.5% ","quality":"水分≤0.5%，重金属≤10ppm","hazard":" 3类 UN1993 ","extra":"drop"},{"name":"B","price":null,"rebate":"13","tax":"9"},{"name":"C","price":null,"details":"DPG class 9 UN3082"},{"name":"D","price":null,"details":"DPG class 9 UN3082","hazard":"UN3082"},{"name":"E","price":null,"details":"DPG class 3","hazard":"class 3 UN3082"}]\n结束', '原文');
+  assert.equal(records.length, 5);
   assert.equal('extra' in records[0], false);
+  assert.equal(records[0].purity, '99.5%');
+  assert.equal(records[0].quality, '水分≤0.5%，重金属≤10ppm');
+  assert.equal(records[0].hazard, '3类 UN1993');
   assert.equal(records[0].raw, '原文');
   assert.equal(records[1].price, null);
   assert.equal(records[1].rebate, 13);
   assert.equal(records[1].tax, 9);
+  assert.equal(records[2].hazard, 'class 9 UN3082', 'class/UN in details fill an omitted hazard');
+  assert.equal(records[3].hazard, 'class 9 UN3082', 'a model that keeps only UN must not drop class');
+  assert.equal(records[4].hazard, 'class 3 UN3082', 'a model reading wins over a different detail reading');
   assert.throws(() => sanitizeQuoteRecords('没有 JSON', '原文'), /没有返回/);
 });
 test('model failures surface the provider message', async () => {
@@ -125,6 +138,30 @@ test('products persist, normalize CAS, reject duplicates and delete by id', asyn
   assert.equal(deleted.revision, 2);
 });
 
+test('product updates preserve identity, edit rate overrides and reject CAS duplicates', async () => {
+  const service = fixture();
+  let db = await service.execute({ action: 'add', kind: 'products', revision: 0, record: { name: 'DMSO', cas: '67-68-5' } });
+  const id = db.products[0].id;
+  db = await service.execute({ action: 'update', kind: 'products', id, revision: 1, record: { name: '二甲基亚砜', tax: 9, rebate: 4 } });
+  assert.deepEqual(db.products[0], { name: '二甲基亚砜', cas: '67-68-5', tax: 9, rebate: 4, id });
+  db = await service.execute({ action: 'add', kind: 'products', revision: 2, record: { name: '乙醇', cas: '64-17-5' } });
+  await assert.rejects(service.execute({ action: 'update', kind: 'products', id, revision: 3, record: { cas: '64-17-5' } }), /已在目录/);
+  db = await service.execute({ action: 'update', kind: 'products', id, revision: 3, record: { tax: null, rebate: null } });
+  assert.equal('tax' in db.products[0], false);
+  assert.equal('rebate' in db.products[0], false);
+  assert.equal((await service.execute({ action: 'list' })).products.length, 2);
+  assert.equal(db.products[0].id, id);
+});
+
+test('product cargo hazard is trimmed, cleared by blank and rejected when not text', async () => {
+  const service = fixture();
+  let db = await service.execute({ action: 'add', kind: 'products', revision: 0, record: { name: 'DMSO', cas: '67-68-5', hazard: ' Class 9 UN3082 ' } });
+  assert.equal(db.products[0].hazard, 'Class 9 UN3082');
+  db = await service.execute({ action: 'update', kind: 'products', id: db.products[0].id, revision: 1, record: { hazard: '' } });
+  assert.equal('hazard' in db.products[0], false);
+  await assert.rejects(service.execute({ action: 'add', kind: 'products', revision: 2, record: { name: 'Bad', cas: '64-17-5', hazard: {} } }), /货物危险性须为文本/);
+});
+
 test('product CAS duplicates include factory and history catalog entries', async () => {
   for (const initial of [
     { factories: [{ ...quote, cas: '67-68-5' }] },
@@ -133,6 +170,11 @@ test('product CAS duplicates include factory and history catalog entries', async
     const service = fixture(initial);
     await assert.rejects(service.execute({ action: 'add', kind: 'products', revision: 0, record: { name: 'alias', cas: '67–68–5' } }), /已在目录/);
     assert.equal((await service.execute({ action: 'list' })).revision, 0);
+    const db = await service.execute({ action: 'add', kind: 'products', revision: 0, record: { name: 'alias', cas: '67–68–5' }, override: true });
+    assert.equal(db.products[0].name, 'alias');
+    assert.equal(db.products[0].cas, '67-68-5');
+    const edited = await service.execute({ action: 'update', kind: 'products', id: db.products[0].id, revision: 1, record: { name: 'alias edited' } });
+    assert.equal(edited.products[0].name, 'alias edited');
   }
 });
 
@@ -184,6 +226,49 @@ test('updating a legacy factory does not invent its creation timestamp', async (
   assert.ok(db.factories[0].updatedAt);
 });
 
+test('quotation returns an editable XLSX without changing records', async () => {
+  const service = fixture({ factories: [{ ...quote, id: 'factory-1', factory: '示例工厂', port: '青岛', incoterm: 'FOB' }] });
+  const values = { ...defaults, ...samples.rmb, seaMax: 6000, customerTerm: 'CIF', place: 'Hamburg' };
+  const file = await service.execute({ action: 'quotation', mode: 'rmb', values, factoryId: 'factory-1' });
+  assert.match(file.filename, /^Quotation_20IBC of DPG_\d{8}\.xlsx$/);
+  assert.match(file.quoteNo, /^SA-[A-Z0-9]{2,3}-\d{8}$/);
+  assert.equal(file.mime, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  assert.ok(file.size > 3000);
+  const buffer = Buffer.from(file.base64, 'base64');
+  assert.equal(buffer.subarray(0, 2).toString(), 'PK');
+  const customerOnly = await service.execute({ action: 'quotation', mode: 'rmb', values, factoryId: 'factory-1', includeCosting: false });
+  assert.ok(customerOnly.size < file.size);
+  assert.equal((await service.execute({ action: 'list' })).revision, 0);
+  await assert.rejects(service.execute({ action: 'quotation', mode: 'rmb', values: { ...values, product: '' } }), /产品名称/);
+  await assert.rejects(service.execute({ action: 'quotation', mode: 'rmb', values, factoryId: 'missing' }), /缺少对应工厂报价/);
+  await assert.rejects(service.execute({ action: 'quotation', mode: 'rmb', values: { ...values, seaMax: 1 } }), /核算数据不完整/);
+});
+
+test('quotation combines multiple products for one customer and snapshots their factories', async () => {
+  const service = fixture({
+    factories: [
+      { ...quote, id: 'f1', name: 'MCP 22%', cas: '67-68-5', purity: '22% P', packing: '25 kg / bag', validity: '2026-11-20' },
+      { ...quote, id: 'f2', name: 'Urea 46%', cas: '57-13-6', purity: '46% N', packing: '50 kg / bag', validity: '2026-11-25' },
+    ],
+  });
+  const first = { ...defaults, ...samples.rmb, product: 'MCP 22%', customer: 'ACME', creditMonths: 3, creditPayment: 'L/C', customerTerm: 'CIF', place: 'Oslo', seaMax: 6000 };
+  const second = { ...first, product: 'Urea 46%', sell: 0.72 };
+  const file = await service.execute({
+    action: 'quotation',
+    items: [
+      { mode: 'rmb', values: first, factoryId: 'f1' },
+      { mode: 'rmb', values: second, factoryId: 'f2' },
+    ],
+  });
+  assert.match(file.filename, /_2items_/);
+  assert.match(file.quoteNo, /^SA-AC-\d{8}$/);
+  assert.ok(file.size > 5000);
+  const saved = await service.execute({ action: 'add', kind: 'history', revision: 0, record: { mode: 'rmb', values: first, factoryId: 'f1' } });
+  assert.equal(saved.history[0].factorySnapshot.id, 'f1');
+  assert.equal(saved.history[0].factorySnapshot.purity, '22% P');
+  await assert.rejects(service.execute({ action: 'quotation', items: [{ mode: 'rmb', values: first, factoryId: 'f1' }, { mode: 'rmb', values: { ...second, customer: 'OTHER' }, factoryId: 'f2' }] }), /同一客户/);
+});
+
 test('history preserves legacy term without overwriting customerTerm', async () => {
   const service = fixture();
   const values = { ...defaults, ...samples.rmb, seaMax: 6000, term: 'EXW', customerTerm: 'CIF' };
@@ -197,15 +282,25 @@ test('history preserves legacy term without overwriting customerTerm', async () 
   assert.equal(imported.history[0].values.customerTerm, undefined);
 });
 
-test('AI prompt requests CAS and quote date and sanitizes them without losing validity text', async () => {
-  let prompt;
+test('AI prompt requests English translation, CAS and quote date and sanitizes them without losing validity text', async () => {
+  let prompt, userPrompt;
   const llm = fakeLlm('', { prepareCall: async () => ({ config: {}, stream: async function* (input) {
     prompt = input.system;
+    userPrompt = input.messages?.[0]?.content?.[0]?.text;
     yield { type: 'text-delta', text: JSON.stringify([{ name: 'DMSO', cas: ' 67 – 68 – 5 ', quoteDate: '2026/11/12', validity: '三天内有效', extra: 'drop' }]) };
   } }) });
   const service = new QuoteWorkbench({ get: () => ({ revision: 0, factories: [], freights: [], history: [] }) }, llm, () => ({ provider: 'test-provider', model: 'test-model' }));
   const parsed = await service.execute({ action: 'parse', raw: 'DMSO CAS 67-68-5 报价日期2026年11月12日' });
+  assert.match(prompt, /先完整翻译，再识别和填写/);
+  assert.match(prompt, /所有自由文本字段一律输出英语/);
+  assert.match(prompt, /非危险品.*non-hazardous/);
+  assert.match(userPrompt, /完整翻译成英语/);
   assert.match(prompt, /cas：CAS/);
+  assert.match(prompt, /purity：含量 \/ 纯度/);
+  assert.match(prompt, /quality：其他关键质量指标/);
+  assert.match(prompt, /hazard：货物危险性/);
+  assert.match(prompt, /class 9 UN3082/);
+  assert.match(prompt, /class 和 UN 同时出现时两段都要保留/);
   assert.match(prompt, /tax：增值税率/);
   assert.match(prompt, /quoteDate：报价日期/);
   assert.equal(parsed.records[0].cas, '67-68-5');
@@ -215,7 +310,10 @@ test('AI prompt requests CAS and quote date and sanitizes them without losing va
   const blank = sanitizeQuoteRecords('[{}]', '原文')[0];
   assert.equal(blank.cas, '');
   assert.equal(blank.quoteDate, '');
-  assert.deepEqual((await service.execute({ action: 'schema' })).productFields.map(field => field[0]), ['name', 'cas']);
+  assert.equal(blank.purity, '');
+  assert.equal(blank.quality, '');
+  assert.equal(blank.hazard, '');
+  assert.deepEqual((await service.execute({ action: 'schema' })).productFields.map(field => field[0]), ['name', 'cas', 'hazard', 'tax', 'rebate']);
 });
 
 test('an unavailable parsing model tells the user where to change it', async () => {

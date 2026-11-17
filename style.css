@@ -48,12 +48,16 @@
 .qw-form > .qw-toolbar{margin-bottom:8px}
 .qw-badge{flex:0 0 auto;font-size:10.5px;color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-l1);border-radius:999px;padding:1px 8px;white-space:nowrap}
 .qw-note{font-size:10.5px;line-height:1.45;color:var(--dsw-alias-label-secondary);margin:3px 0 0;overflow-wrap:anywhere}
+.qw-field-error{font-size:10.5px;line-height:1.35;color:var(--dsw-alias-state-error-primary);margin:0;overflow-wrap:anywhere}
+.qw-root input[aria-invalid=true]{border-color:var(--dsw-alias-state-error-primary)}
 .qw-source{display:flex;gap:6px;align-items:center}
 .qw-source select{flex:1;min-width:0}
 .qw-source button{flex:0 0 auto}
 .qw-filters{display:flex;align-items:flex-end;gap:8px 10px;flex-wrap:wrap;margin-bottom:6px}
 .qw-filters .qw-filter{flex:1 1 200px;min-width:150px;max-width:280px}
 .qw-filters button{flex:0 0 auto;margin-bottom:1px}
+.qw-history-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:2px 0 4px}
+.qw-history-check{padding:0;flex:0 0 auto;margin-right:2px}
 .qw-form-foot{flex:0 0 auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:9px;padding-top:8px;border-top:1px solid var(--dsw-alias-border-l1)}
 .qw-form-foot .qw-note{margin:0}
 .qw-list-body{flex:1;min-height:0;overflow:auto;padding-right:4px}
@@ -74,6 +78,10 @@
 .qw-root .qw-check{display:flex;flex-direction:row;align-items:center;color:var(--dsw-alias-label-primary);font-size:12px}
 .qw-root .qw-check input{width:14px;height:14px;accent-color:var(--dsw-alias-brand-primary);flex:0 0 auto}
 .qw-results-body{flex:1;min-height:0;overflow:auto;padding-right:4px}
+.qw-export-bar{flex:0 0 auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:2px 0 8px;margin-bottom:6px;border-bottom:1px solid var(--dsw-alias-border-l1)}
+.qw-export-bar .qw-note{margin:0;flex:1 1 120px;min-width:0}
+.qw-export-bar .qw-export-button{flex:0 0 auto}
+.qw-export-option{flex:0 0 auto;font-size:11px;color:var(--dsw-alias-label-secondary);white-space:nowrap}
 .qw-metric{padding:6px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}
 .qw-metric:last-child{border-bottom:0}
 .qw-metric span{display:block;font-size:10.5px;color:var(--dsw-alias-label-secondary)}

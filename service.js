@@ -1,43 +1,57 @@
 import { randomUUID } from 'node:crypto';
-import { basic, costs, params, factoryFields, freightFields, validateDatabase, validateRecord, validateCalculation, calculate, lookupCreditRate, averageFreights, normalizeCas, normalizeFactoryDate, catalogProducts } from './domain.js';
+import { basic, costs, params, factoryFields, productFields, freightFields, validateDatabase, validateRecord, validateCalculation, calculate, lookupCreditRate, averageFreights, normalizeCas, normalizeFactoryDate, catalogProducts, extractHazard } from './domain.js';
+import { buildQuotationWorkbook } from './xlsx.js';
 
 const INCOTERMS = ['EXW', 'FCA', 'FOB', 'CFR', 'CIF'];
 const SESSION_ID = `dsh-quote-workbench-${randomUUID()}`;
 const SYSTEM_PROMPT = `你是报价工作台的报价提取器。用户会粘贴工厂报价，可能是自由文本，也可能是从 Excel 复制来的制表符表格。请把它提取为 JSON 数组，每个报价一条记录。
 只输出 JSON 数组本身，不要解释，不要 Markdown 代码块。
 
+翻译规则（必须先执行）：
+- 先完整翻译，再识别和填写：把每条报价的全部文字先翻译成英语，然后基于英文完成产品归类、字段识别和带入。
+- 除 unit、warehouse、portfee 这三个必须使用固定中文值的字段，以及 currency、incoterm 这两个固定英文枚举字段外，所有自由文本字段一律输出英语。
+- 需要翻译的自由文本包括：name、purity 的说明文字、quality、hazard、factory、details、quantity、validity、port、loading、packing、delivery。
+- 数字、百分比、CAS 号、UN 编号、日期、币种和 Incoterm 保持原值；不要改变数量、单价或单位换算关系。
+- 不要在任何自由文本字段中保留中文原文，也不要把中文原文和英文译文同时写入。
+
 每条记录的字段：
-- name：产品 / 规格（含含量、包装等关键描述）；没有就留空字符串
+- name：产品名称 / 规格（英文；不含含量、纯度和包装）；没有就留空字符串
+- purity：含量 / 纯度（英文描述，保留数字和符号，如 99.5%、≥99%）；没有留空，不要推测
+- quality：其他关键质量指标（英文，如水分、杂质、重金属、外观、粒径等）；没有留空
+- hazard：货物危险性（英文）。凡出现 "class 9 UN3082"、"Class 3"、"UN 1993" 这类格式（class/Class + 类别数字，UN + 四位数字），都填入本字段并保留格式；class 和 UN 同时出现时两段都要保留。"非危险品"译为 "non-hazardous"；没有留空，不要推测
 - cas：CAS 号，仅提取原文明确给出的编号，格式如 67-68-5；没有留空，不要根据产品名称推测
 - quoteDate：报价日期，尽量规范为 YYYY-MM-DD；没有留空，不要用当前日期补填
-- factory：工厂名称；没有留空
-- details：这一条报价的完整原文明细，保留原文
-- quantity：数量口径（如 22t/20GP、1000kg）；没有留空
-- validity：报价有效期；没有留空
+- factory：工厂名称（英文）；没有留空
+- details：这一条报价的完整明细（英文翻译，保留数字、CAS、UN、日期、币种和 Incoterm）；没有留空
+- quantity：数量口径（英文，如 22t/20GP、1000 kg）；没有留空
+- validity：报价有效期（英文）。原文写的是期限（如 "30 days"、"two weeks"、"一个月"）就原样输出该期限，由工作台按报价日期加该期限计算；原文写的是具体日期就输出 YYYY-MM-DD；没有留空
 - price：报价单价，纯数字；有多个价格、价格区间或标题行时填 null
 - currency："USD" 或 "RMB"
 - tax：增值税率百分数 0–100；明确写了增值税率才填；未提到填 null
 - rebate：退税率百分数 0–100；明确不退税填 0；未提到填 null
-- unit："吨" 或 "公斤"；无法判断填 "待确认"
+- unit：固定用中文 "吨" 或 "公斤"；无法判断填 "待确认"（此字段不要翻译）
 - incoterm："EXW"、"FCA"、"FOB"、"CFR"、"CIF"、"其他" 或 "待确认"
-- port：交货地点或港口；没有留空
-- loading：装柜量 / 柜型；没有留空
-- packing：包装方式；没有留空
-- delivery：交货期，尽量含年份；原文没有年份就保留原文
-- warehouse：进仓费承担方，"我方" 或 "工厂"
-- portfee：港杂费承担方，"我方" 或 "工厂"
+- port：交货地点或港口（英文，如 Qingdao、Shanghai）；没有留空
+- loading：装柜量 / 柜型（英文或原格式，如 22t/20GP、20GP）；没有留空
+- packing：包装方式（英文，如 unpalletized、25 kg bags）；没有留空
+- delivery：交货期（英文，尽量含年份，如 December 2026）；没有留空
+- warehouse：进仓费承担方，固定用中文 "我方" 或 "工厂"（此字段不要翻译）
+- portfee：港杂费承担方，固定用中文 "我方" 或 "工厂"（此字段不要翻译）
 
 规则：
 - 文本里有多个产品、多行报价或多段报价时，拆成多条记录。
 - 单价后跟"美金/美元/USD/$"记 USD；跟"元/人民币/RMB"记 RMB；没写币种时根据上下文判断，默认 RMB。
 - "每吨 / MT / t / 吨"记吨；"每公斤 / kg / 公斤"记公斤；都判断不了填"待确认"。
-- 不要臆造价格、工厂、日期和费用承担方；不确定的字段用空字符串、null 或"待确认"。
+- 报价有效期是 "30 days / 30 天 / 两周" 这类期限时保留期限原文，不要自行换算成日期。
+- class 9 UN3082、class 3、UN 1993、UN3082 等均为货物危险性，写入 hazard；不要只保留 UN 编号而丢掉 class。
+- 货物危险性只写入 hazard，不要重复写入 quality。
+- 不要臆造价格、工厂、日期、含量/纯度、质量指标、货物危险性和费用承担方；不确定的字段用空字符串、null 或"待确认"。
 - 金额只保留数字，不要货币符号和千分位。
 - 如果粘贴的内容看起来不是报价，返回 []。`;
 
 function buildParsePrompt(raw, now = new Date()) {
   return `现在时间：${now.toISOString()}（${now.toLocaleString('zh-CN')}）。
-请提取下面内容里的工厂报价：
+请先把下面内容完整翻译成英语，再基于英文提取工厂报价；所有自由文本字段都用英语输出：
 
 <raw>
 ${raw}
@@ -66,6 +80,24 @@ const noteNumber = value => {
   }
   return null;
 };
+/** Product records keep optional VAT/rebate and cargo-hazard overrides; absent fields continue to follow the CAS binding. */
+function productRecord(record, base = {}) {
+  const next = { ...base };
+  if (Object.hasOwn(record, 'name')) next.name = typeof record.name === 'string' ? record.name.trim() : record.name;
+  if (Object.hasOwn(record, 'cas')) next.cas = normalizeCas(record.cas);
+  if (Object.hasOwn(record, 'hazard')) {
+    if (record.hazard !== null && record.hazard !== undefined && typeof record.hazard !== 'string') throw Error('货物危险性须为文本。');
+    const hazard = typeof record.hazard === 'string' ? record.hazard.trim() : '';
+    if (hazard) next.hazard = hazard;
+    else delete next.hazard;
+  }
+  for (const key of ['tax', 'rebate']) {
+    if (!Object.hasOwn(record, key)) continue;
+    if (record[key] === null || record[key] === undefined || record[key] === '') delete next[key];
+    else next[key] = Number(record[key]);
+  }
+  return next;
+}
 function detectUnit(text) {
   if (/吨|\bMT\b|\d+\s*t\s*\//i.test(text)) return '吨';
   if (/公斤|千克|\bkg\b|\/\s*kg/i.test(text)) return '公斤';
@@ -74,6 +106,15 @@ function detectUnit(text) {
 function detectCurrency(text) {
   return /USD|美金|美元|\$/i.test(text) ? 'USD' : 'RMB';
 }
+/** Keep both class and UN from a trusted per-record detail when the model dropped one of them. */
+function hazardValue(modelHazard, details, trusted) {
+  if (!trusted) return modelHazard;
+  const source = extractHazard(details);
+  const hasClass = value => /\bclass\b|\d+(?:\.\d+)?\s*类/i.test(value);
+  const hasUn = value => /\bUN\s*(?:No\.?|Number|编号)?\s*[:：]?\s*(\d{4}|[xX]{4})\b/i.test(value);
+  if (source && (!modelHazard || (!hasClass(modelHazard) && hasClass(source)) || (!hasUn(modelHazard) && hasUn(source)))) return source;
+  return modelHazard || source;
+}
 
 /** 模型输出不可信：只保留白名单字段并做类型收敛。 */
 export function sanitizeQuoteRecords(output, raw) {
@@ -81,7 +122,8 @@ export function sanitizeQuoteRecords(output, raw) {
   const list = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.records) ? parsed.records : null;
   if (!list) throw Error('模型没有返回报价数组，请重试或换一个模型');
   return list.filter(row => row && typeof row === 'object' && !Array.isArray(row)).map(row => {
-    const details = plainText(row.details ?? row.raw, 4000) || raw;
+    const detailText = plainText(row.details ?? row.raw, 4000);
+    const details = detailText || raw;
     const price = noteNumber(row.price);
     const tax = noteNumber(row.tax);
     const rebate = noteNumber(row.rebate);
@@ -89,6 +131,9 @@ export function sanitizeQuoteRecords(output, raw) {
     const incotermText = plainText(row.incoterm, 10).toUpperCase();
     return {
       name: plainText(row.name),
+      purity: plainText(row.purity ?? row.content ?? row.assay, 100),
+      quality: plainText(row.quality ?? row.qualityIndicators ?? row.indicators, 1000),
+      hazard: hazardValue(plainText(row.hazard ?? row.danger ?? row.dangerousGoods ?? row.hazardClass, 300), details, Boolean(detailText)),
       cas: normalizeCas(plainText(row.cas)),
       quoteDate: normalizeFactoryDate(plainText(row.quoteDate, 100)),
       factory: plainText(row.factory),
@@ -190,7 +235,7 @@ export class QuoteWorkbench {
     const db = structuredClone(stored);
     if (db.settings === undefined) db.settings = null;
     if (db.products === undefined) db.products = [];
-    if (action === 'schema') return { basic, costs, params, factoryFields, freightFields, productFields: [['name', '产品名称', 'text'], ['cas', 'CAS 号', 'text']], modes: ['rmb', 'usd', 'own'] };
+    if (action === 'schema') return { basic, costs, params, factoryFields, freightFields, productFields, modes: ['rmb', 'usd', 'own'] };
     if (action === 'list' || action === 'export') return db;
     if (action === 'settings') return { settings: db.settings, revision: db.revision, effective: this.effective(db.settings) };
     if (action === 'models') return this.listModels(db.settings);
@@ -200,6 +245,39 @@ export class QuoteWorkbench {
     if (action === 'calculate') {
       if (!validateCalculation(input.values, input.mode)) throw Error('核算数据不完整或超出有效范围');
       return { result: calculate(input.values, input.mode), highFreightResult: calculate({ ...input.values, sea: input.values.seaMax }, input.mode) };
+    }
+    if (action === 'quotation') {
+      const rawItems = Array.isArray(input.items) && input.items.length
+        ? input.items
+        : [{ mode: input.mode, values: input.values, factoryId: input.factoryId, factory: input.factory }];
+      const items = rawItems.map(item => {
+        if (!validateCalculation(item?.values, item?.mode)) throw Error('核算数据不完整或超出有效范围');
+        if (!item.values.product?.trim()) throw Error('请先填写产品名称再导出报价单');
+        let factory = item.factoryId ? db.factories.find(row => row.id === item.factoryId) : null;
+        if (!factory && item.factory && typeof item.factory === 'object' && !Array.isArray(item.factory)) factory = item.factory;
+        if (!factory && item.mode !== 'own') throw Error('缺少对应工厂报价，请重新选择工厂报价后再输出');
+        return {
+          mode: item.mode,
+          values: item.values,
+          result: calculate(item.values, item.mode),
+          highFreightResult: calculate({ ...item.values, sea: item.values.seaMax }, item.mode),
+          factory: factory || null,
+        };
+      });
+      const customer = String(items[0].values.customer ?? '').trim();
+      if (items.length > 1 && (!customer || items.some(item => String(item.values.customer ?? '').trim().toLowerCase() !== customer.toLowerCase()))) {
+        throw Error('合并报价需选择同一客户的核算记录');
+      }
+      const includeCosting = input.includeCosting !== false;
+      const file = buildQuotationWorkbook({ items, includeCosting });
+      return {
+        filename: file.filename,
+        quoteNo: file.quoteNo,
+        mime: file.mime,
+        size: file.buffer.length,
+        base64: file.buffer.toString('base64'),
+        generatedAt: file.generatedAt,
+      };
     }
     if (!['add', 'update', 'delete', 'import', 'saveSettings'].includes(action)) throw Error('未知操作');
     if (input.revision !== stored.revision) throw Error('记录已更新，请刷新后重试，避免覆盖其他窗口的修改');
@@ -225,17 +303,38 @@ export class QuoteWorkbench {
     } else {
       if (!['factories', 'freights', 'history', 'products'].includes(input.kind)) throw Error('请选择有效记录类型');
       if (action === 'update') {
-        if (input.kind !== 'factories') throw Error('仅支持更新工厂报价');
-        const index = db.factories.findIndex(row => row.id === input.id);
+        if (!['factories', 'products', 'history'].includes(input.kind)) throw Error('仅支持更新工厂报价、产品或核算记录');
+        const rows = db[input.kind];
+        const index = rows.findIndex(row => row.id === input.id);
         if (index < 0) throw Error('记录不存在，请刷新');
         if (!input.record || typeof input.record !== 'object' || Array.isArray(input.record)) throw Error('记录必须是有效对象。');
-        const previous = db.factories[index];
-        const next = { ...previous, ...structuredClone(input.record), id: previous.id, updatedAt: new Date().toISOString() };
-        if (previous.createdAt === undefined) delete next.createdAt;
-        else next.createdAt = previous.createdAt;
-        if (next.cas !== undefined) next.cas = normalizeCas(next.cas);
-        validateRecord('factories', next);
-        db.factories[index] = next;
+        const previous = rows[index];
+        if (input.kind === 'factories') {
+          const next = { ...previous, ...structuredClone(input.record), id: previous.id, updatedAt: new Date().toISOString() };
+          if (previous.createdAt === undefined) delete next.createdAt;
+          else next.createdAt = previous.createdAt;
+          if (next.cas !== undefined) next.cas = normalizeCas(next.cas);
+          validateRecord('factories', next);
+          rows[index] = next;
+        } else if (input.kind === 'history') {
+          const next = { ...previous, ...structuredClone(input.record), id: previous.id };
+          if (!validateCalculation(next.values, next.mode)) throw Error('核算数据不完整或超出有效范围');
+          const factoryId = typeof next.factoryId === 'string' ? next.factoryId : null;
+          const source = factoryId ? db.factories.find(row => row.id === factoryId) : null;
+          if (source) next.factorySnapshot = structuredClone(source);
+          else { delete next.factoryId; delete next.factorySnapshot; }
+          // Overwrite keeps the original record id and date; only the calculation and factory source change.
+          next.result = calculate(next.values, next.mode);
+          next.highFreightResult = calculate({ ...next.values, sea: next.values.seaMax }, next.mode);
+          validateRecord('history', next);
+          rows[index] = next;
+        } else {
+          const next = productRecord(input.record, previous);
+          validateRecord('products', next);
+          // Editing name/rates of an existing CAS is always allowed; a changed CAS must stay unique.
+          if (next.cas !== normalizeCas(previous.cas) && catalogProducts({ ...db, products: db.products.filter(row => row.id !== next.id) }).some(row => normalizeCas(row.cas) === next.cas)) throw Error('该 CAS 号已在目录中。');
+          rows[index] = next;
+        }
       } else if (action === 'delete') {
         const index = db[input.kind].findIndex(row => row.id === input.id);
         if (index < 0) throw Error('记录不存在，请刷新');
@@ -244,13 +343,22 @@ export class QuoteWorkbench {
         let next = structuredClone(input.record);
         if (input.kind === 'history') {
           if (!validateCalculation(next?.values, next?.mode)) throw Error('核算数据不完整或超出有效范围');
+          const factoryId = typeof next.factoryId === 'string' ? next.factoryId : null;
+          const source = factoryId ? db.factories.find(row => row.id === factoryId) : null;
+          if (source) next.factorySnapshot = structuredClone(source);
+          else delete next.factorySnapshot;
           next = { ...next, result: calculate(next.values, next.mode), highFreightResult: calculate({ ...next.values, sea: next.values.seaMax }, next.mode), date: new Date().toISOString() };
         }
         if (input.kind === 'products' && next && typeof next === 'object' && !Array.isArray(next)) {
-          next = { name: typeof next.name === 'string' ? next.name.trim() : next.name, cas: normalizeCas(next.cas) };
+          next = productRecord(next);
         }
         validateRecord(input.kind, next);
-        if (input.kind === 'products' && catalogProducts(db).some(product => normalizeCas(product.cas) === next.cas)) throw Error('该 CAS 号已在目录中。');
+        if (input.kind === 'products') {
+          const exists = catalogProducts(db).some(product => normalizeCas(product.cas) === next.cas);
+          const manualExists = db.products.some(product => normalizeCas(product.cas) === next.cas);
+          // Editing a quote-derived product stores a manual catalog override; a plain add still rejects duplicates.
+          if (exists && !(input.override === true && !manualExists)) throw Error('该 CAS 号已在目录中。');
+        }
         if (input.kind === 'factories') {
           next.createdAt = new Date().toISOString();
           delete next.updatedAt;

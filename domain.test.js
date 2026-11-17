@@ -12,8 +12,12 @@ const lclFreight = (extra={}) => ({agent:'货代甲',origin:'上海',destination
 const bulkyFreight = (extra={}) => lclFreight({bulky:'是',volume:3,...extra});
 
 test('exports the requested domain API and RMB freight maximum field',()=>{
-  for(const name of ['basic','costs','params','factoryFields','freightFields','defaults','samples','transportModes','creditCountries','lookupCreditRate','calculate','fcaCost','cfrCost','factoryQuantityKg','validRebate','validateCalculation','parseQuotes','validateRecord','validateDatabase','averageFreights']) assert.ok(name in d,name);
+  for(const name of ['basic','costs','params','factoryFields','productFields','freightFields','defaults','samples','transportModes','creditCountries','lookupCreditRate','calculate','fcaCost','cfrCost','factoryQuantityKg','validRebate','validateCalculation','parseQuotes','validateRecord','validateDatabase','averageFreights','localDateString','validityDuration','addValidityDate','factoryValidity']) assert.ok(name in d,name);
   assert.ok(d.costs.some(([key])=>key==='seaMax'));
+  assert.ok(d.factoryFields.some(([key])=>key==='purity'));
+  assert.ok(d.factoryFields.some(([key])=>key==='quality'));
+  assert.ok(d.factoryFields.some(([key])=>key==='hazard'));
+  assert.ok(d.productFields.some(([key])=>key==='hazard'));
 });
 test('RMB rebate, insurance, interest and freight bounds retain original formulas',()=>{
   const v=input(), low=d.calculate(v,'rmb'), high=d.calculate({...v,sea:v.seaMax},'rmb');
@@ -85,7 +89,7 @@ test('calculation rejects missing, nonfinite and negative amounts in every activ
   for(const n of [0,13,100]) assert.equal(d.validRebate(n),true);
 });
 test('credit rate table exactly matches original country/payment/period boundaries',()=>{
-  const source=readFileSync(new URL('../dist/credit-rates.js',import.meta.url),'utf8');
+  const source=readFileSync(new URL('test/fixtures/credit-rates.js',import.meta.url),'utf8');
   const baseline=vm.runInNewContext(source+'; ({creditCountries,lookupCreditRate})',{Intl});
   assert.equal(d.creditCountries.length,baseline.creditCountries.length);
   for(const country of d.creditCountries) for(const payment of ['L/C','D/P','D/A 或 O/A']) for(const months of [0,1,1.001,2,2.001,3,3.001,6,6.001,12,12.001,24,24.001]) {
@@ -95,10 +99,11 @@ test('credit rate table exactly matches original country/payment/period boundari
   for(const args of [['XXX',1,'L/C'],['USA',null,'L/C'],['USA',-1,'L/C'],['USA',7,'D/P'],['USA',1,'?']]) assert.equal(d.lookupCreditRate(...args),null);
 });
 test('free text keeps raw details and identifies explicit currency, unit and trade terms',()=>{
-  const raw='DPG USD 1,250/MT FOB 青岛，20t/20GP，不打托，2026年12月交货，含进仓费';
+  const raw='DPG 含量 99.5%，质量指标：水分≤0.5%，重金属≤10ppm。货物危险性：3类 UN1993。USD 1,250/MT FOB 青岛，20t/20GP，不打托，2026年12月交货，含进仓费';
   const [r]=d.parseQuotes(raw);
   assert.equal(r.details,raw); assert.equal(r.raw,raw); assert.equal(r.price,1250);
   assert.equal(r.currency,'USD'); assert.equal(r.unit,'吨'); assert.equal(r.incoterm,'FOB');
+  assert.equal(r.purity,'99.5%'); assert.equal(r.quality,'水分≤0.5%，重金属≤10ppm'); assert.equal(r.hazard,'3类 UN1993');
   assert.equal(r.warehouse,'工厂'); assert.equal(r.rebate,null);
   assert.equal(d.parseQuotes('单价 14.2 元/公斤')[0].price,14.2);
   assert.equal(d.parseQuotes('USD 20/kg 或 USD 18/kg')[0].price,'');
@@ -109,14 +114,34 @@ test('free text keeps raw details and identifies explicit currency, unit and tra
   assert.equal(d.parseQuotes('USD 20/kg，交货期 2026-12-01')[0].price,20);
   assert.deepEqual(d.parseQuotes('  '),[]);
 });
+test('cargo hazard recognizes class and UN formats from free text',()=>{
+  const cases=[
+    ['DPG class 9 UN3082','class 9 UN3082'],
+    ['DPG Class 3 UN 1993','Class 3 UN 1993'],
+    ['DPG CLASS 9.1 UN3082','CLASS 9.1 UN3082'],
+    ['DPG class 3','class 3'],
+    ['DPG class x','class x'],
+    ['DPG UN 1993','UN 1993'],
+    ['DPG UN3082','UN3082'],
+    ['DPG UN No. 3082','UN No. 3082'],
+    ['DPG UN XXXX','UN XXXX'],
+    ['DPG 9类 UN3082','9类 UN3082'],
+    ['DPG 危险品类别：class 9 UN3082。FOB 青岛','class 9 UN3082'],
+    ['DPG 非危险品','非危险品'],
+  ];
+  for(const [raw,expected] of cases) assert.equal(d.parseQuotes(raw)[0].hazard,expected,raw);
+  assert.equal(d.extractHazard('UN 3082 class 9'),'UN 3082 class 9');
+  assert.equal(d.extractHazard(''),'');
+});
 test('header TSV returns every row and preserves multiline quoted details and explicit fields',()=>{
-  const raw='产品\t工厂\t报价明细\t数量\t报价有效期\t交货期\r\nDPG\t甲厂\t"USD 20/kg\n含进仓费，注明 ""现货"""\t1吨\t月底\t2026年12月\r\nDCP\t乙厂\tUSD 21/kg 或 USD 22/kg\t2吨\t本周\t2027年1月';
+  const raw='产品\t工厂\t报价明细\t数量\t报价有效期\t交货期\t含量 / 纯度\t其他关键质量指标\t货物危险性\r\nDPG\t甲厂\t"USD 20/kg\n含进仓费，注明 ""现货"""\t1吨\t月底\t2026年12月\t99.5%\t水分≤0.5%，重金属≤10ppm\t3类 UN1993\r\nDCP\t乙厂\tUSD 21/kg 或 USD 22/kg\t2吨\t本周\t2027年1月\t98%\t外观：白色粉末\t非危险品';
   const rows=d.parseQuotes(raw);
   assert.equal(rows.length,2); assert.equal(rows[0].name,'DPG'); assert.equal(rows[0].factory,'甲厂');
   assert.equal(rows[0].details,'USD 20/kg\n含进仓费，注明 "现货"');
   assert.equal(rows[0].raw,rows[0].details); assert.equal(rows[0].price,20);
   assert.equal(rows[0].quantity,'1吨'); assert.equal(rows[0].delivery,'2026年12月');
-  assert.equal(rows[1].price,'');
+  assert.equal(rows[0].purity,'99.5%'); assert.equal(rows[0].quality,'水分≤0.5%，重金属≤10ppm'); assert.equal(rows[0].hazard,'3类 UN1993');
+  assert.equal(rows[1].price,''); assert.equal(rows[1].purity,'98%'); assert.equal(rows[1].quality,'外观：白色粉末'); assert.equal(rows[1].hazard,'非危险品');
   assert.deepEqual(d.parseQuotes('产品\t报价明细\n'),[]);
 });
 test('record and backup validators throw Chinese errors and preserve legacy histories',()=>{
@@ -150,11 +175,35 @@ test('CAS catalog follows dist precedence, normalization and derived-entry rules
   const before=JSON.stringify(db);
   assert.deepEqual(d.catalogProducts(db),[{id:'manual',name:'手工名称',cas:'67-68-5',manualIndex:0},{name:'历史产品',cas:'64-17-5'},{name:'工厂产品',cas:'7732-18-5'}]);
   assert.equal(JSON.stringify(db),before);
+  const rated={products:[{id:'manual',name:'手工名称',cas:'67-68-5',tax:9,rebate:4}],history:[{values:{product:'历史名称',cas:'67-68-5',tax:13,rebate:13}}]};
+  assert.deepEqual(d.catalogProducts(rated),[{id:'manual',name:'手工名称',cas:'67-68-5',tax:9,rebate:4,manualIndex:0}]);
+  assert.equal(d.validateRecord('products',{name:'产品',cas:'67-68-5',tax:13,rebate:0}).rebate,0);
+  assert.throws(()=>d.validateRecord('products',{name:'产品',cas:'67-68-5',tax:101}),/增值税/);
+  assert.throws(()=>d.validateRecord('products',{name:'产品',cas:'67-68-5',rebate:101}),/退税/);
   assert.equal(d.normalizeCas(' 67<br>–68&nbsp;–5 '),'67-68-5');
   assert.throws(()=>d.validateRecord('products',{name:'产品',cas:'bad'}),/CAS/);
   assert.throws(()=>d.validateDatabase({factories:[],freights:[],history:[],products:{}}),/产品目录/);
   assert.equal(d.defaults.customerTerm,'待确认');
   assert.ok(!d.basic.some(([key])=>key==='term'));
+});
+test('CAS catalog cargo hazard follows the newest factory quote and catalog values win',()=>{
+  const catalog=d.catalogProducts({
+    products:[{id:'manual',name:'手工名称',cas:'67-68-5',hazard:'Manual class 9'}],
+    factories:[
+      {name:'工厂产品',cas:'64-17-5',hazard:'Class 8 UN1814'},
+      {name:'无危险性',cas:'7732-18-5'},
+    ],
+  });
+  assert.equal(catalog.find(row=>row.cas==='67-68-5').hazard,'Manual class 9','manual catalog hazard wins');
+  assert.equal(catalog.find(row=>row.cas==='64-17-5').hazard,'Class 8 UN1814','derived product keeps the quote hazard');
+  assert.equal('hazard' in catalog.find(row=>row.cas==='7732-18-5'),false);
+  const follows=d.catalogProducts({products:[{id:'manual',name:'DMSO',cas:'67-68-5'}],factories:[
+    {name:'新报价',cas:'67-68-5',hazard:'Class 3 UN1993'},
+    {name:'旧报价',cas:'67-68-5',hazard:'Class 9 UN3082'},
+  ]});
+  assert.equal(follows[0].hazard,'Class 3 UN1993','the first/newest quote binds an empty catalog hazard');
+  assert.equal(d.validateRecord('products',{name:'产品',cas:'67-68-5',hazard:'Class 3'}).hazard,'Class 3');
+  assert.throws(()=>d.validateRecord('products',{name:'产品',cas:'67-68-5',hazard:{}}),/货物危险性/);
 });
 test('rule extraction preserves CAS and quote dates from Excel headers',()=>{
   for(const label of ['CAS','CAS 号','CAS号']) {
@@ -223,4 +272,27 @@ test('history filters match CAS or customer keywords anywhere in the stored valu
   assert.deepEqual(keep({cas:'67',customer:'king'}),[],'both filters must match');
   assert.deepEqual(keep({cas:'-',customer:'   '}),rows,'separator-only CAS and blank customer keep every record');
   assert.deepEqual(rows.filter(row=>d.historyMatches(row)),rows,'a missing filter keeps every record');
+});
+test('quote validity is the quote date plus a stated period and ignores order-relative periods',()=>{
+  const plan=(quoteDate,validity)=>d.factoryValidity(quoteDate,validity);
+  assert.equal(plan('2026-11-17','30 days').date,'2026-12-17');
+  assert.equal(plan('2026-11-17','30 days').label,'30 天');
+  assert.equal(plan('2026-11-17','30 天').date,'2026-12-17','full-width and Chinese periods work');
+  assert.equal(plan('2026-11-17','two weeks').date,'2026-12-01');
+  assert.equal(plan('2026-11-17','三日内有效').date,'2026-11-20','spelled Chinese numbers work');
+  assert.equal(plan('2026-11-17','一个月').date,'2026-12-17');
+  assert.equal(plan('2026-01-31','1 month').date,'2026-02-28','month arithmetic clamps to the month end');
+  assert.equal(plan('2026-11-17','2027/01/31'),null,'an absolute date needs no conversion');
+  assert.equal(plan('2026-11-17','月底'),null);
+  assert.equal(plan('2026-11-17','30 days after order'),null,'order-relative periods are not quote validity');
+  assert.equal(plan('2026-11-17','收到订单后一周'),null);
+  assert.equal(plan('2026-11-17','2026年12月'),null,'a calendar date must not be read as a period');
+  assert.equal(plan('2026-02-30','30 days'),null,'an invalid quote date cannot seed a validity');
+  assert.equal(plan('','30 days'),null);
+  assert.equal(d.localDateString(new Date(2026,10,17,23,30)),'2026-11-17','components stay local, not UTC-shifted');
+  assert.equal(d.localDateString(new Date('bad')),'');
+  const [row]=d.parseQuotes('产品\t报价明细\t报价日期\t报价有效期\nProdA\tUSD 20/kg\t2026/11/17\t30 days');
+  assert.equal(row.quoteDate,'2026-11-17');
+  assert.equal(row.validity,'30 days','the stated period survives rule extraction for the form to convert');
+  assert.equal(d.parseQuotes('产品\t报价明细\t报价有效期\nProdA\tUSD 20/kg\t2026.12.31')[0].validity,'2026-12-31');
 });
