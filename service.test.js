@@ -114,6 +114,7 @@ test('sanitizer drops unknown fields, tolerates summaries and keeps multiple quo
   assert.equal(records[1].price, null);
   assert.equal(records[1].rebate, 13);
   assert.equal(records[1].tax, 9);
+  assert.equal(sanitizeQuoteRecords('[{"quantity":"1,000 kg"}]', '原文')[0].quantity, '1000');
   assert.equal(records[2].hazard, 'class 9 UN3082', 'class/UN in details fill an omitted hazard');
   assert.equal(records[3].hazard, 'class 9 UN3082', 'a model that keeps only UN must not drop class');
   assert.equal(records[4].hazard, 'class 3 UN3082', 'a model reading wins over a different detail reading');
@@ -240,6 +241,7 @@ test('quotation returns an editable XLSX without changing records', async () => 
   assert.ok(customerOnly.size < file.size);
   assert.equal((await service.execute({ action: 'list' })).revision, 0);
   await assert.rejects(service.execute({ action: 'quotation', mode: 'rmb', values: { ...values, product: '' } }), /产品名称/);
+  await assert.rejects(service.execute({ action: 'quotation', mode: 'rmb', values: { ...values, etd: '11月' }, factoryId: 'factory-1' }), /ETD/);
   await assert.rejects(service.execute({ action: 'quotation', mode: 'rmb', values, factoryId: 'missing' }), /缺少对应工厂报价/);
   await assert.rejects(service.execute({ action: 'quotation', mode: 'rmb', values: { ...values, seaMax: 1 } }), /核算数据不完整/);
 });

@@ -42,7 +42,7 @@ function workbook(mode, overrides = {}, factoryOverride = factory, includeCostin
 }
 
 test('quotation workbook is a valid two-sheet XLSX with an English editable quotation', () => {
-  const file = workbook('rmb', { customer: 'Polar Feed', customerTerm: 'CIF', place: 'Oslo', transportMode: '海运整柜', creditMonths: 3, creditPayment: 'L/C' });
+  const file = workbook('rmb', { customer: 'Polar Feed', customerTerm: 'CIF', place: 'Oslo', transportMode: '海运整柜', creditMonths: 3, creditPayment: 'L/C', etd: 'Mid November 2026' });
   assert.equal(file.filename, 'Quotation_20IBC of DPG_20261116.xlsx');
   assert.equal(file.quoteNo, 'SA-PF-20261116');
   assert.equal(file.buffer.subarray(0, 2).toString(), 'PK');
@@ -68,6 +68,8 @@ test('quotation workbook is a valid two-sheet XLSX with an English editable quot
   assert.match(quote, /Polar Feed/);
   assert.match(quote, /SA-PF-20261116/);
   assert.match(quote, /16 November 2026/);
+  assert.match(quote, /Mid November 2026/);
+  assert.doesNotMatch(quote, /2026 年 11 月/);
   assert.match(quote, /CIF Oslo, BY SEA IN FCL/);
   assert.match(quote, /20IBC of DPG/);
   assert.match(quote, /99\.5%; 20IBC 托盘/);

@@ -391,6 +391,7 @@ function quoteSheet({ items, quoteNo, generatedAt, dateText }) {
     const specification = [factory?.purity, factory?.packing].filter(Boolean).join('; ');
     const factoryName = factory?.factory || (item.mode === 'own' ? 'Own factory' : '');
     const remark = [factory?.hazard, factory?.quality].filter(Boolean).join('; ');
+    const etdText = String(item.values.etd ?? '').trim();
     const set = (col, value, style) => {
       if (value !== undefined && value !== null && value !== '') sheet.cell(row, col, value, style);
     };
@@ -399,7 +400,7 @@ function quoteSheet({ items, quoteNo, generatedAt, dateText }) {
     set(4, specification, STYLE.bodyLeft);
     set(5, Number.isFinite(item.values.sell) ? item.values.sell : '', STYLE.unitPrice);
     set(6, factoryName, STYLE.bodyCenter);
-    set(7, factory?.delivery || '', STYLE.bodyCenter);
+    set(7, etdText, STYLE.bodyCenter);
     set(8, remark, STYLE.bodyLeft);
   });
 

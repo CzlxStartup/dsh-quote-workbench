@@ -6,7 +6,7 @@ window.__ModuleLoader__.load({
  // Pure business rules extracted from the original quotation workbench.
 // No DOM, storage, or runtime service dependencies.
 const transportModes=['海运整柜','海运拼箱','空运','铁路','公路','快递','其他'];
-const basic=[['cas','CAS 号','text'],['transportMode','运输方式',['',...transportModes]],['product','产品 / 规格','text'],['customer','客户','text'],['quoteCountry','报价国家 / 地区',['']],['creditMonths','账期（月）','number'],['creditPayment','信保付款方式',['','L/C','D/P','D/A 或 O/A']],['qty','数量 kg','number'],['sell','对客单价 USD/kg','number'],['customerTerm','Incoterm',['待确认','EXW','FCA','FOB','CFR','CIF','其他']],['place','交货地点 / 港口','text']];
+const basic=[['cas','CAS 号','text'],['transportMode','运输方式',['',...transportModes]],['product','产品 / 规格','text'],['customer','客户','text'],['quoteCountry','报价国家 / 地区',['']],['creditMonths','账期（月）','number'],['creditPayment','信保付款方式',['','L/C','D/P','D/A 或 O/A']],['qty','数量 kg','number'],['sell','对客单价 USD/kg','number'],['customerTerm','Incoterm',['待确认','EXW','FCA','FOB','CFR','CIF','其他']],['place','交货地点 / 港口','text'],['etd','ETD（预计开船日）','text']];
 const costs=[['buy','工厂采购单价','number'],['fx','买汇 / 成本汇率 RMB/USD','number'],['receive','收汇汇率 RMB/USD','number'],['sea','国际运费 USD/票','number'],['local','国内费用总额 RMB/票','number'],['tax','增值税率 %','number'],['rebate','退税率 %','number']];
 const params=[['transport','运输保险费率 %','number'],['credit','信用保险费率 %','number'],['interest','年资金利率 %','number'],['months','资金占用月数','number']];
 const factoryFields=[['cas','CAS 号','text'],['quoteDate','报价日期','date'],['name','产品','text'],['purity','含量 / 纯度','text'],['quality','其他关键质量指标','text'],['hazard','货物危险性','text'],['factory','工厂','text'],['details','报价明细','text'],['quantity','数量','text'],['validity','报价有效期','date'],['price','报价单价','number'],['currency','币种',['USD','RMB']],['tax','增值税率 %','number'],['rebate','退税率 %（不退税填 0）','number'],['unit','计价单位',['待确认','吨','公斤']],['incoterm','Incoterm',['待确认','EXW','FCA','FOB','CFR','CIF','其他']],['port','交货地点','text'],['loading','装柜量 / 柜型','text'],['packing','包装方式','text'],['delivery','交货期（含年份）','text'],['warehouse','进仓费承担方',['我方','工厂']],['portfee','港杂费承担方',['我方','工厂']]];
@@ -15,7 +15,7 @@ const freightContainerTypes=['20GP','40GP','40HQ','45HQ'];
 const freightUnits=['公斤','吨','CBM','票'];
 const freightBulkyOptions=['否','是'];
 const freightFields=[['agent','货代名称','text'],['origin','起运地','text'],['destination','目的地','text'],['transportMode','运输方式',['海运整柜','海运拼箱','空运']],['containerType','柜型',freightContainerTypes],['quantity','询价数量','number'],['quantityUnit','询价单位',freightUnits],['bulky','是否抛货',freightBulkyOptions],['volume','体积（CBM）','number'],['valid','有效期','date'],['sea','国际运费 USD/票','number'],['local','国内费用 RMB/票','number']];
-const defaults={product:'',cas:'',customer:'',qty:null,sell:null,customerTerm:'待确认',place:'',buy:null,fx:6.75,receive:6.75,sea:null,local:null,tax:13,rebate:null,transport:.03,credit:null,interest:3.6,months:3};
+const defaults={product:'',cas:'',customer:'',qty:null,sell:null,customerTerm:'待确认',place:'',etd:'',buy:null,fx:6.75,receive:6.75,sea:null,local:null,tax:13,rebate:null,transport:.03,credit:null,interest:3.6,months:3};
 function validRebate(rate){return Number.isFinite(rate)&&rate>=0&&rate<=100;}
 function fcaCost(v){return (v.buy-v.buy/(1+v.tax/100)*(v.rebate/100))/v.fx;}
 function calculate(v,m){const revenue=v.qty*v.sell,insurance=revenue*1.1*v.transport/100,credit=revenue*v.credit/100,interest=revenue*v.interest/100/12*v.months;if(m==='own'){const rate=v.receive,unit=v.sell-(insurance+credit+interest+v.sea+v.local/rate)/v.qty;return{unit,rmb:unit*(1+v.tax/100)/(1+(v.tax-v.rebate)/100)*rate,insurance,credit,interest}}const base=m==='rmb'?fcaCost(v):v.buy+v.local/v.fx/v.qty;const landed=base+v.sea/v.qty+(m==='rmb'?v.local/v.fx/v.qty:0);const profit=revenue-insurance-credit-interest-landed*v.qty;return{base,landed,profit,margin:base?v.qty?profit/(base*v.qty):0:0,rmb:revenue*v.receive-(insurance+credit+interest)*v.fx-landed*v.fx*v.qty,insurance,credit,interest}}
@@ -41,10 +41,16 @@ const creditNames = {
  907:'萨巴',908:'圣马丁岛',909:'盖比群岛',910:'社会群岛',911:'土阿莫土群岛',912:'马恩岛',913:'诺曼底群岛'
 };
 const creditRegions = new Intl.DisplayNames(["zh-CN"], {type:"region"});
+const creditRegionsEn = new Intl.DisplayNames(["en"], {type:"region"});
 const creditCodes = {"MMR":"MM","SAU":"SA","SVN":"SI","TLS":"TL","AUT":"AT","CYM":"KY","MYT":"YT","KWT":"KW","BDI":"BI","URY":"UY","QAT":"QA","CHN":"CN","MKD":"MK","KEN":"KE","DJI":"DJ","PSE":"PS","JEY":"JE","HUN":"HU","SGP":"SG","KOR":"KR","COD":"CD","GEO":"GE","LSO":"LS","ASM":"AS","PAK":"PK","DNK":"DK","ITA":"IT","ROU":"RO","GLP":"GP","FLK":"FK","JOR":"JO","UGA":"UG","LBY":"LY","LVA":"LV","BGD":"BD","TCA":"TC","NRU":"NR","KHM":"KH","KIR":"KI","GRD":"GD","DZA":"DZ","MNE":"ME","MDV":"MV","SDN":"SD","SOM":"SO","FRO":"FO","COK":"CK","HRV":"HR","TWN":"TW","MNP":"MP","GRL":"GL","FIN":"FI","MSR":"MS","UZB":"UZ","JAM":"JM","CPV":"CV","JPN":"JP","LTU":"LT","":"001","NGA":"NG","AIA":"AI","USA":"US","CAF":"CF","SEN":"SN","BHR":"BH","AFG":"AF","ARM":"AM","GMB":"GM","LBN":"LB","SXM":"SX","TJK":"TJ","SLE":"SL","PLW":"PW","LCA":"LC","TUN":"TN","DMA":"DM","PRI":"PR","PRY":"PY","NLD":"NL","TKL":"TK","NER":"NE","CUB":"CU","AND":"AD","RWA":"RW","ERI":"ER","PRT":"PT","ZMB":"ZM","GNQ":"GQ","HTI":"HT","HND":"HN","CMR":"CM","GTM":"GT","COG":"CG","BEL":"BE","PER":"PE","BEN":"BJ","TCD":"TD","CCK":"CC","BES":"BQ","SJM":"SJ","SHN":"SH","ARG":"AR","BLM":"BL","NFK":"NF","CHL":"CL","NIC":"NI","ALA":"AX","EST":"EE","SLB":"SB","MTQ":"MQ","REU":"RE","NPL":"NP","ECU":"EC","SWZ":"SZ","VGB":"VG","RUS":"RU","MHL":"MH","POL":"PL","OMN":"OM","MLT":"MT","IRL":"IE","MCO":"MC","FSM":"FM","MWI":"MW","IDN":"ID","GNB":"GW","MUS":"MU","DOM":"DO","ISL":"IS","TKM":"TM","GBR":"GB","MLI":"ML","CAN":"CA","CIV":"CI","TUR":"TR","IND":"IN","BRN":"BN","SWE":"SE","GUF":"GF","PNG":"PG","KAZ":"KZ","VUT":"VU","CXR":"CX","ATG":"AG","NOR":"NO","GIB":"GI","ALB":"AL","KGZ":"KG","IOT":"IO","BLZ":"BZ","SPM":"PM","SSD":"SS","AGO":"AO","LIE":"LI","NCL":"NC","HKG":"HK","KNA":"KN","IRQ":"IQ","ZAF":"ZA","CUW":"CW","GUY":"GY","MAC":"MO","UMI":"UM","LKA":"LK","THA":"TH","BLR":"BY","ETH":"ET","MAF":"MF","SUR":"SR","VIR":"VI","ARE":"AE","LUX":"LU","EGY":"EG","CHE":"CH","BGR":"BG","AUS":"AU","GUM":"GU","YEM":"YE","MRT":"MR","PAN":"PA","MEX":"MX","SVK":"SK","NZL":"NZ","ABW":"AW","PCN":"PN","WSM":"WS","TON":"TO","MDA":"MD","BHS":"BS","MNG":"MN","IMN":"IM","WLF":"WF","FRA":"FR","BFA":"BF","VNM":"VN","COM":"KM","CZE":"CZ","STP":"ST","VEN":"VE","PRK":"KP","NIU":"NU","COL":"CO","XKK":"XK","PHL":"PH","TTO":"TT","UKR":"UA","MDG":"MG","BRB":"BB","BOL":"BO","GRC":"GR","TGO":"TG","ESP":"ES","SYC":"SC","SYR":"SY","TZA":"TZ","AZE":"AZ","BRA":"BR","FJI":"FJ","SMR":"SM","LAO":"LA","ZWE":"ZW","CYP":"CY","BWA":"BW","BIH":"BA","VAT":"VA","DEU":"DE","TUV":"TV","GAB":"GA","PYF":"PF","GIN":"GN","SLV":"SV","MAR":"MA","GHA":"GH","MOZ":"MZ","BMU":"BM","VCT":"VC","ESH":"EH","LBR":"LR","GGY":"GG","IRN":"IR","NAM":"NA","SRB":"RS","MYS":"MY","CRI":"CR","ISR":"IL","BTN":"BT"};
-const creditCountries = Object.entries(creditGroups).flatMap(([group,codes])=>codes.split(' ').map(code=>({
- code, group, label: creditNames[code] || (creditCodes[code] ? creditRegions.of(creditCodes[code]) : code)
-}))).sort((a,b)=>a.label.localeCompare(b.label,'zh-CN'));
+const creditCountries = Object.entries(creditGroups).flatMap(([group,codes])=>codes.split(' ').map(code=>{
+  const iso2 = creditCodes[code] || '';
+  return {
+    code, iso2, group,
+    label: creditNames[code] || (iso2 ? creditRegions.of(iso2) : code),
+    english: iso2 ? creditRegionsEn.of(iso2) : '',
+  };
+})).sort((a,b)=>a.label.localeCompare(b.label,'zh-CN'));
 const creditPeriods = [[30,'0–30 天'],[60,'31–60 天'],[90,'61–90 天'],[180,'91–180 天'],[360,'181 天–1 年'],[720,'1–2 年']];
 const creditRates = {
  'L/C':[[.031,.041,.043,.169,.172],[.107,.113,.135,.530,.534],[.154,.189,.307,.717,.753],[.223,.257,.390,1,1.034],[.271,.325,.475,1.187,1.243],[.317,.393,.558,1.373,1.451]],
@@ -193,6 +199,8 @@ const positive = n => Number.isFinite(n) && n > 0;
 // 结构化文本只允许英文、数字和标点；工厂名称是中文字段的唯一例外。
 const chinesePattern = /[\u3000-\u303F\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/;
 const hasChinese = value => typeof value === 'string' && chinesePattern.test(value);
+/** ETD is free text restricted to printable ASCII (English letters, digits, spaces and punctuation). */
+const englishText = value => !/[^\x20-\x7E]/.test(String(value ?? ''));
 const text = s => typeof s === 'string' && s.trim().length > 0;
 const object = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const modes = ['rmb', 'usd', 'own'];
@@ -209,7 +217,8 @@ function factoryQuantityKg(value, unit) {
 /** C&F (CFR) unit cost only needs cost inputs, not selling price or credit terms. */
 function cfrCost(v, mode) {
   if (!object(v) || !['rmb', 'usd'].includes(mode) || !positive(v.qty) || !positive(v.fx)) return null;
-  if (![v.buy, v.sea, v.local].every(nonnegative)) return null;
+  if (![v.buy, v.local].every(nonnegative)) return null;
+  if (!(mode === 'usd' ? Number.isFinite(v.sea) : nonnegative(v.sea))) return null;
   if (mode === 'rmb' && (!nonnegative(v.tax) || !validRebate(v.rebate))) return null;
   const base = mode === 'rmb' ? fcaCost(v) : v.buy;
   return base + v.sea / v.qty + v.local / v.fx / v.qty;
@@ -220,7 +229,9 @@ function validateCalculation(v, mode) {
   if (!object(v) || !modes.includes(mode) || !positive(v.qty)) return false;
   if (mode === 'own' ? !positive(v.receive) : !positive(v.fx)) return false;
   if (mode === 'usd' && !positive(v.receive)) return false;
-  if (!['sell','sea','seaMax','local','transport','credit','interest','months'].every(k => nonnegative(v[k]))) return false;
+  if (!['sell','local','transport','credit','interest','months'].every(k => nonnegative(v[k]))) return false;
+  const validFreight = mode === 'usd' ? Number.isFinite : nonnegative;
+  if (!validFreight(v.sea) || !validFreight(v.seaMax)) return false;
   if (mode !== 'usd' && !nonnegative(v.tax)) return false;
   if (mode !== 'own' && !nonnegative(v.buy)) return false;
   if (v.seaMax < v.sea) return false;
@@ -282,6 +293,7 @@ function validateRecord(kind, r) {
       v.rebate ??= 0;
     } else v.seaMax ??= v.sea;
     if (!validateCalculation(v,r.mode)) throw new Error('核算记录中的数量、费用、汇率或退税率无效。');
+    if (v.etd != null && v.etd !== '' && !englishText(v.etd)) throw new Error('ETD 只能输入英文字符、数字和标点。');
     const keys = r.mode === 'own' ? ['unit','rmb','insurance','credit','interest'] : ['base','landed','profit','margin','rmb','insurance','credit','interest'];
     const resultOK = result => object(result) && keys.every(k => Number.isFinite(result[k]));
     if (!resultOK(r.result)) throw new Error('核算记录缺少有效计算结果。');
@@ -415,7 +427,7 @@ function parseQuotes(raw) {
       validity:normalizeFactoryDate(explicit.validity) || String(explicit.validity ?? '').trim()};
   });
 }
-{normalizeCas,normalizeFactoryDate,localDateString,validityDuration,addValidityDate,factoryValidity,historyMatches,catalogProducts,basic,costs,params,factoryFields,productFields,freightFields,defaults,samples,transportModes,creditCountries,lookupCreditRate,calculate,fcaCost,cfrCost,factoryQuantityKg,validRebate,hasChinese,validateCalculation,parseQuotes,extractHazard,validateRecord,validateDatabase,averageFreights,freightRoute,freightBasis,freightContainerTypes,freightUnits,freightBulkyOptions};
+{normalizeCas,normalizeFactoryDate,localDateString,validityDuration,addValidityDate,factoryValidity,historyMatches,catalogProducts,basic,costs,params,factoryFields,productFields,freightFields,defaults,samples,transportModes,creditCountries,lookupCreditRate,calculate,fcaCost,cfrCost,factoryQuantityKg,validRebate,hasChinese,englishText,validateCalculation,parseQuotes,extractHazard,validateRecord,validateDatabase,averageFreights,freightRoute,freightBasis,freightContainerTypes,freightUnits,freightBulkyOptions};
 
  // Bundled with domain.js by build.mjs; React is provided by Harness.
 function createUI(React, ctx, t, css) {
@@ -425,7 +437,7 @@ function createUI(React, ctx, t, css) {
   const emptyForm = defs => Object.fromEntries(defs.map(([key,, type]) => [key, Array.isArray(type) ? type[0] : type === 'number' ? null : '']));
   const ordered = (defs, order) => [...defs].sort((a, b) => { const ia = order.indexOf(a[0]), ib = order.indexOf(b[0]); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); });
   // Frequently used fields come first so each page opens on its working set.
-  const basicOrder = ['product','cas','customer','qty','sell','transportMode','customerTerm','place','quoteCountry','creditMonths','creditPayment'];
+  const basicOrder = ['product','cas','customer','qty','sell','transportMode','customerTerm','place','etd','quoteCountry','creditMonths','creditPayment'];
   const calcOrder = ['buy','fx','receive','sea','seaMax','local','tax','rebate','transport','credit','interest','months'];
   const factoryOrder = ['name','cas','purity','quality','hazard','price','currency','tax','rebate','unit','incoterm','port','quoteDate','validity','delivery','factory','quantity','loading','packing','warehouse','portfee','details'];
   const freightOrder = ['agent','origin','destination','transportMode','containerType','quantity','quantityUnit','bulky','volume','valid','sea','local'];
@@ -459,6 +471,8 @@ function createUI(React, ctx, t, css) {
   // Every unsaved page draft shares one session cache and expires five minutes after leaving the panel.
   const draftStorageKey = 'quote-workbench.drafts.v2', draftTtlMs = 5 * 60 * 1000;
   const tabKeys = ['factory', 'calc', 'freight', 'history', 'products'];
+  const TABLE_LABELS = { factories: '工厂报价', freights: '货代报价', history: '核算记录', products: '产品目录' };
+  const FIELD_LABELS = { cas: 'CAS 号', quoteDate: '报价日期', quoteCountry: '报价国家', customer: '客户', product: '产品', sell: '对客单价', sea: '国际运费', local: '国内费用', agent: '货代名称', origin: '起运地', destination: '目的地', transportMode: '运输方式', price: '报价单价', tax: '增值税率', rebate: '退税率', hazard: '货物危险性', name: '产品名称', qty: '数量', mode: '核算方式' };
   const calcModes = ['rmb', 'usd', 'own'];
   const blankCalc = mode => ({ ...defaults, ...(mode === 'rmb' ? { fx: null } : {}), seaMax: null });
   function blankCalcCache() {
@@ -503,8 +517,8 @@ function createUI(React, ctx, t, css) {
 
     const factory = isRecord(stored.factory) ? stored.factory : {};
     const form = isRecord(factory.form) ? { ...empty.factory.form, ...factory.form } : empty.factory.form;
-    if (!normalizeFactoryDate(form.quoteDate)) form.quoteDate = localDateString();
     const pending = Array.isArray(factory.pending) ? factory.pending.filter(isRecord) : [];
+    if (!normalizeFactoryDate(form.quoteDate) && !factory.editing && !pending[0]?.id) form.quoteDate = localDateString();
     empty.factory = {
       form,
       raw: typeof factory.raw === 'string' ? factory.raw : '',
@@ -578,19 +592,149 @@ function createUI(React, ctx, t, css) {
   function Icon({ size = 20 }) {
     return h('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, 'aria-hidden': true }, h('rect', { x: 4, y: 2, width: 16, height: 20, rx: 3 }), h('path', { d: 'M8 7h8M8 11h3M8 16h4m-2-2v4m4-2h3' }));
   }
-  function Fields({ defs, value, onChange, disabled = [], hidden = [], labels = {}, wide = [], spans = {}, className }) {
+  function CountrySelect({ value, disabled, onChange }) {
+    const [query, setQuery] = useState(null);
+    const [open, setOpen] = useState(false);
+    const [active, setActive] = useState(0);
+    const selected = creditCountries.find(row => row.code === value);
+    const countryText = row => `${row.label}${row.english ? ` · ${row.english}` : ''} · ${row.code}`;
+    const term = (query ?? '').trim().toLowerCase();
+    const matches = term
+      ? creditCountries.filter(row => [row.label, row.english, row.iso2, row.code].some(text => String(text ?? '').toLowerCase().includes(term)))
+      : creditCountries;
+    const display = query ?? (selected ? countryText(selected) : '');
+    useEffect(() => { setQuery(null); }, [value]);
+    function choose(row) { onChange(row.code); setQuery(null); setOpen(false); }
+    function clear() { onChange(''); setQuery(null); }
+    function onKeyDown(event) {
+      if (event.key === 'ArrowDown') { event.preventDefault(); setOpen(true); setActive(index => Math.min(matches.length - 1, index + 1)); }
+      else if (event.key === 'ArrowUp') { event.preventDefault(); setOpen(true); setActive(index => Math.max(0, index - 1)); }
+      else if (event.key === 'Enter' && open && matches[Math.min(active, matches.length - 1)]) { event.preventDefault(); choose(matches[Math.min(active, matches.length - 1)]); }
+      else if (event.key === 'Escape') { event.preventDefault(); setOpen(false); setQuery(null); }
+    }
+    return h('div', { className: 'qw-country-select' },
+      h('input', {
+        type: 'text', value: display, disabled, autoComplete: 'off', role: 'combobox', 'aria-expanded': open, 'aria-autocomplete': 'list', 'aria-controls': 'qw-country-menu',
+        placeholder: t('输入国家中文 / English / 代码'), 'aria-label': t('报价国家 / 地区'),
+        onFocus: event => { setOpen(true); setActive(0); if (event.target.select) event.target.select(); },
+        onClick: () => setOpen(true),
+        onChange: event => {
+          const next = event.target.value;
+          setQuery(next); setOpen(true); setActive(0);
+          if (!next) return clear();
+          const hit = creditCountries.find(row => countryText(row) === next || row.code === next);
+          if (hit) choose(hit);
+        },
+        onKeyDown,
+        onBlur: () => { setOpen(false); setQuery(null); },
+      }),
+      open && h('div', { id: 'qw-country-menu', className: 'qw-country-menu', role: 'listbox', 'aria-label': t('报价国家 / 地区'), onMouseDown: event => event.stopPropagation(), onClick: event => event.stopPropagation() },
+        matches.length
+          ? matches.map((row, index) => h('div', {
+              key: row.code, role: 'option', 'aria-selected': row.code === value, className: `qw-country-option${index === active ? ' qw-active' : ''}`,
+              onMouseDown: event => { event.preventDefault(); event.stopPropagation(); choose(row); },
+              onClick: event => { event.preventDefault(); event.stopPropagation(); },
+              onMouseEnter: () => setActive(index),
+            }, countryText(row)))
+          : h('div', { className: 'qw-country-empty' }, t('没有匹配的国家 / 地区'))));
+  }
+  const productSearchKey = value => String(value ?? '').normalize('NFKC').toLowerCase().trim().replace(/\s+/g, ' ');
+  function productSuggestions(products, query) {
+    const term = productSearchKey(query);
+    if (!term || term.length > 96) return [];
+    function distance(name) {
+      let previous = Array.from({ length: term.length + 1 }, (_, i) => i);
+      let beforePrevious;
+      for (let i = 1; i <= name.length; i++) {
+        const row = [i];
+        for (let j = 1; j <= term.length; j++) {
+          row[j] = Math.min(row[j - 1] + 1, previous[j] + 1, previous[j - 1] + Number(name[i - 1] !== term[j - 1]));
+          if (i > 1 && j > 1 && name[i - 1] === term[j - 2] && name[i - 2] === term[j - 1]) {
+            row[j] = Math.min(row[j], beforePrevious[j - 2] + 1);
+          }
+        }
+        beforePrevious = previous;
+        previous = row;
+      }
+      return previous[term.length];
+    }
+    function score(name) {
+      if (name === term) return 0;
+      if (name.startsWith(term)) return 1;
+      if (name.includes(term)) return 2;
+      if (term.length < 4) return Infinity;
+      const tolerance = term.length >= 8 ? 2 : 1;
+      if (Math.abs(name.length - term.length) > tolerance) return Infinity;
+      const edits = distance(name);
+      return edits <= tolerance ? 2 + edits : Infinity;
+    }
+    return products.map(product => ({ product, rank: score(productSearchKey(product.name)) }))
+      .filter(({ rank }) => Number.isFinite(rank))
+      .sort((a, b) => a.rank - b.rank || a.product.name.localeCompare(b.product.name) || a.product.cas.localeCompare(b.product.cas))
+      .slice(0, 8);
+  }
+  function ProductSearch({ products, onSelect, invalid, label, ...input }) {
+    const [show, setShow] = useState(false);
+    const [active, setActive] = useState(-1);
+    const activeRef = useRef(null);
+    const display = input.value;
+    const matches = show && !input.disabled ? productSuggestions(products, display) : [];
+    const expanded = show && !input.disabled && Boolean(productSearchKey(display));
+    const optionId = index => `qw-product-suggestion-${index}`;
+    useEffect(() => { activeRef.current?.scrollIntoView?.({ block: 'nearest' }); }, [active]);
+    function close() { setShow(false); setActive(-1); }
+    function choose(product) { close(); onSelect(product); }
+    function handleKey(event) {
+      if (event.nativeEvent?.isComposing) return;
+      if (event.key === 'Escape' && expanded) { event.preventDefault(); event.stopPropagation(); close(); }
+      if (event.key === 'Enter' && matches[active]) { event.preventDefault(); choose(matches[active].product); }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        const available = show ? matches : productSuggestions(products, display);
+        if (!available.length) return;
+        event.preventDefault(); setShow(true);
+        setActive(index => event.key === 'ArrowDown' ? Math.min(index + 1, available.length - 1) : index < 0 ? available.length - 1 : Math.max(index - 1, 0));
+      }
+    }
+    return h('div', { className: 'qw-country-select' },
+      h('input', { ...input, value: display, type: 'text', role: 'combobox', autoComplete: 'off', 'aria-label': t(label),
+        'aria-invalid': invalid || undefined, 'aria-autocomplete': 'list', 'aria-expanded': expanded,
+        'aria-controls': expanded ? 'qw-product-suggestions' : undefined,
+        'aria-activedescendant': matches[active] ? optionId(active) : undefined,
+        placeholder: t('输入产品名称搜索'), onFocus: () => setShow(true), onClick: () => setShow(true),
+        onBlur: close,
+        onChange: event => { input.onChange(event); setShow(true); setActive(-1); }, onKeyDown: handleKey }),
+      expanded && h('div', { className: 'qw-country-menu qw-product-menu' },
+        !matches.length && h('div', { className: 'qw-country-empty', role: 'status' }, t('未找到相似产品，可继续手动输入。')),
+        matches.length > 0 && h('div', { className: 'qw-country-empty' }, t('↑↓ 选择 · Enter 确认')),
+        h('div', { id: 'qw-product-suggestions', role: 'listbox', 'aria-label': t('产品推荐') },
+          matches.map(({ product, rank }, index) => h('div', { id: optionId(index), key: product.cas, role: 'option',
+            ref: index === active ? activeRef : undefined, 'aria-selected': index === active,
+            className: `qw-country-option qw-product-option${index === active ? ' qw-active' : ''}`,
+            onMouseDown: event => event.preventDefault(), onClick: () => choose(product) },
+          h('span', null, product.name), h('small', null, `CAS ${product.cas}${rank > 2 ? ` · ${t('相似')}` : ''}`))))));
+  }
+  function Fields({ defs, value, onChange, disabled = [], hidden = [], labels = {}, wide = [], spans = {}, className, productLookup, signed = [] }) {
     return h('div', { className: className ? `qw-grid ${className}` : 'qw-grid' }, defs.filter(([id]) => !hidden.includes(id)).map(([id, label, type]) => {
-      const options = id === 'quoteCountry' ? [['', t('请选择国家 / 地区')], ...creditCountries.map(c => [c.code, `${c.label} · ${c.code}`])] : Array.isArray(type) ? type.map(x => [x, t(x)]) : null;
+      const options = Array.isArray(type) ? type.map(x => [x, t(x)]) : null;
       const props = { value: value[id] ?? '', disabled: disabled.includes(id), onChange: e => onChange(id, type === 'number' ? e.target.value === '' ? null : Number(e.target.value) : e.target.value) };
       const classes = [id === 'details' || id === 'quality' || wide.includes(id) ? 'qw-field-wide' : '', spans[id] ? `qw-span-${spans[id]}` : ''].filter(Boolean).join(' ');
       // 结构化单行文本只允许英文/数字/标点；工厂名称可含中文，明细/质量/粘贴原文不受限。
-      const invalid = type === 'text' && id !== 'factory' && id !== 'details' && id !== 'quality' && hasChinese(value[id]);
-      const control = options
-        ? h('select', props, options.map(([key, text]) => h('option', { key, value: key }, text)))
-        : id === 'details' || id === 'quality'
-          ? h('textarea', { ...props, rows: id === 'details' ? 3 : 2 })
-          : h('input', { ...props, type, 'aria-invalid': invalid || undefined, ...(type === 'number' ? { min: 0, step: 'any' } : {}) });
-      return h('label', { key: id, className: classes || undefined }, h('span', null, t(labels[id] || label)), control, invalid && h('span', { className: 'qw-field-error' }, t('不能包含中文')));
+      const digitsOnly = type === 'text' && id === 'quantity';
+      const quantityText = String(value[id] ?? '').trim();
+      const invalidDigits = digitsOnly && quantityText !== '' && !/^\d+$/.test(quantityText);
+      const invalidChinese = !digitsOnly && type === 'text' && id !== 'factory' && id !== 'details' && id !== 'quality' && hasChinese(value[id]);
+      const invalidEtd = id === 'etd' && !englishText(value[id]);
+      const invalid = invalidDigits || invalidChinese || invalidEtd;
+      const control = id === 'product' && productLookup
+        ? h(ProductSearch, { ...props, ...productLookup, invalid, label: labels[id] || label })
+        : id === 'quoteCountry'
+        ? h(CountrySelect, { value: value[id] ?? '', disabled: disabled.includes(id), onChange: next => onChange(id, next) })
+        : options
+          ? h('select', props, options.map(([key, text]) => h('option', { key, value: key }, text)))
+          : id === 'details' || id === 'quality'
+            ? h('textarea', { ...props, rows: id === 'details' ? 3 : 2 })
+            : h('input', { ...props, type, inputMode: digitsOnly ? 'numeric' : undefined, pattern: digitsOnly ? '[0-9]*' : undefined, 'aria-invalid': invalid || undefined, ...(type === 'number' ? { min: signed.includes(id) ? undefined : 0, step: 'any' } : {}) });
+      return h('label', { key: id, className: classes || undefined }, h('span', null, t(labels[id] || label)), control, invalid && h('span', { className: 'qw-field-error' }, t(invalidEtd ? 'ETD 只能输入英文字符、数字和标点' : invalidDigits ? '数量只能填写阿拉伯数字' : '不能包含中文')));
     }));
   }
   function App() {
@@ -603,6 +747,8 @@ function createUI(React, ctx, t, css) {
     const [factory, setFactory] = useState(restored.factory.form), [freight, setFreight] = useState(restored.freight);
     const [raw, setRaw] = useState(restored.factory.raw), [pending, setPending] = useState(restored.factory.pending), [index, setIndex] = useState(restored.factory.index), [selected, setSelected] = useState(restored.selected), [selectedHistory, setSelectedHistory] = useState(restored.selectedHistory), [historySource, setHistorySource] = useState(restored.historySource), [source, setSource] = useState(restored.calc.sources[restored.calc.mode]);
     const [parseModel, setParseModel] = useState(null), [parsing, setParsing] = useState(false);
+    const [sync, setSync] = useState(null);
+    const refreshSync = () => api({ action: 'syncStatus' }).then(setSync).catch(() => {});
     const [editing, setEditing] = useState(restored.factory.editing), [product, setProduct] = useState(restored.product), [productEditing, setProductEditing] = useState(restored.productEditing), [catalogSearch, setCatalogSearch] = useState(restored.catalogSearch);
     const [historyFilter, setHistoryFilter] = useState(restored.historyFilter);
     const [includeCosting, setIncludeCosting] = useState(true);
@@ -697,7 +843,27 @@ function createUI(React, ctx, t, css) {
       return record;
     }
     function resetFactory() { setEditing(null); setPending([]); setIndex(0); loadFactoryForm(); setRaw(''); autofill.current.factory = ''; autofill.current.factoryHazard = ''; autofill.current.factoryRates = {}; }
-    function editFactory(row) { setEditing(row.id); setPending([]); setIndex(0); loadFactoryForm(row, false, false); setRaw(row.raw || ''); autofill.current.factory = ''; autofill.current.factoryHazard = String(row.hazard ?? '').trim(); autofill.current.factoryRates = {}; setTab('factory'); setMessage(t('正在编辑已保存的报价。')); }
+    const draftFormRef = useRef(null), focusCopiedDraft = useRef(false);
+    useEffect(() => {
+      if (!focusCopiedDraft.current || !draftFormRef.current) return;
+      focusCopiedDraft.current = false;
+      draftFormRef.current.focus();
+    }, [tab, factory, v]);
+    function openFactory(row, editingOriginal) {
+      const { id, createdAt, updatedAt, ...fields } = row;
+      focusCopiedDraft.current = !editingOriginal;
+      setEditing(editingOriginal ? id : null);
+      setPending(editingOriginal ? [] : [row]);
+      setIndex(0);
+      loadFactoryForm(fields, false, false);
+      setRaw(row.raw || '');
+      autofill.current.factory = '';
+      autofill.current.factoryHazard = String(row.hazard ?? '').trim();
+      autofill.current.factoryRates = {};
+      setTab('factory');
+      setError('');
+      setMessage(t(editingOriginal ? '正在编辑已保存的报价。' : '已复制到新报价草稿，请确认后保存。'));
+    }
     function acceptParsed(records) {
       setEditing(null); setPending(records); setIndex(0); autofill.current.factory = ''; autofill.current.factoryHazard = ''; autofill.current.factoryRates = {};
       loadFactoryForm(records[0]);
@@ -709,6 +875,7 @@ function createUI(React, ctx, t, css) {
         .catch(e => { if (e.name !== 'AbortError') setError(e.message); });
       return () => controller.abort();
     }, []);
+    useEffect(() => { refreshSync(); }, []);
     useEffect(() => { if (historySource && db && !db.history.some(row => row.id === historySource)) setHistorySource(null); }, [historySource, db]);
     useEffect(() => { try { if (typeof localStorage !== 'undefined') localStorage.setItem(zoomStorageKey, String(zoom)); } catch { /* 隐私模式或宿主禁用存储时保持当前缩放 */ } }, [zoom]);
     useEffect(() => {
@@ -731,7 +898,7 @@ function createUI(React, ctx, t, css) {
       lock.current = true; setBusy(true); setError(''); setMessage('');
       try { await fn(); } catch (e) { setError(e.message); } finally { lock.current = false; setBusy(false); }
     }
-    async function mutate(input) { const next = await api({ ...input, revision: db.revision }); setDb(next); setSelected([]); setSelectedHistory([]); setMessage(t('已保存。')); }
+    async function mutate(input) { const next = await api({ ...input, revision: db.revision }); setDb(next); setSelected([]); setSelectedHistory([]); setMessage(t('已保存。')); refreshSync(); }
     const button = (text, onClick, extra = {}) => h('button', { type: 'button', disabled: busy, onClick, ...extra }, t(text));
     const note = text => h('p', { className: 'qw-note' }, text);
     const costingOption = () => h('label', { className: 'qw-check qw-export-option', title: t('同时导出内部成本页') }, h('input', { type: 'checkbox', checked: includeCosting, 'aria-label': t('包含成本数据'), onChange: e => setIncludeCosting(e.target.checked) }), t('包含成本数据'));
@@ -739,6 +906,7 @@ function createUI(React, ctx, t, css) {
     // 文本字段的中文校验：工厂名称例外，明细/质量等长文本例外。
     const invalidText = (defs, value) => defs.filter(([id,, type]) => type === 'text' && id !== 'factory' && id !== 'details' && id !== 'quality' && hasChinese(value?.[id]));
     const assertTextClean = (defs, value) => {
+      if (value && Object.hasOwn(value, 'etd') && !englishText(value.etd)) throw Error('ETD 只能输入英文字符、数字和标点。');
       const bad = invalidText(defs, value);
       if (bad.length) throw Error(`以下字段不能包含中文：${bad.map(([, label]) => t(label)).join('、')}。`);
     };
@@ -759,6 +927,20 @@ function createUI(React, ctx, t, css) {
       setMode(next); setV(calcCache.drafts[next]); setSource(calcCache.sources[next]);
       setHistorySource(null);
       setMessage('');
+    }
+    // Saving a calculation ends this round: the form and every per-mode draft restart blank.
+    function clearCalc() {
+      for (const nextMode of calcModes) {
+        calcCache.used[nextMode] = false;
+        calcCache.monthsManual[nextMode] = false;
+        calcCache.drafts[nextMode] = blankCalc(nextMode);
+        calcCache.sources[nextMode] = '';
+        autofill.current.calc[nextMode] = '';
+        autofill.current.rates[nextMode] = {};
+      }
+      setV(blankCalc(mode));
+      setSource('');
+      setHistorySource(null);
     }
     function change(id, value) {
       calcCache.used[mode] = true;
@@ -781,9 +963,9 @@ function createUI(React, ctx, t, css) {
       const targetValues = targetMode === mode || !calcCache.used[targetMode] ? v : calcCache.drafts[targetMode];
       const targetManual = targetMode === mode || !calcCache.used[targetMode] ? calcCache.monthsManual[mode] : calcCache.monthsManual[targetMode];
       if (!keepMode) setHistorySource(null);
-      start(targetMode, { ...targetValues, product: row.name || '', cas: normalizeCas(row.cas), buy: Number(row.price) / (row.unit === '吨' ? 1000 : 1), place: row.port || '', rebate: Number.isFinite(rebate) ? rebate : null, ...(quantity ? { qty: quantity } : {}) }, targetManual);
+      start(targetMode, { ...targetValues, product: row.name || '', cas: normalizeCas(row.cas), buy: Number(row.price) / (row.unit === '吨' ? 1000 : 1), rebate: Number.isFinite(rebate) ? rebate : null, ...(quantity ? { qty: quantity } : {}) }, targetManual);
       autofill.current.calc[targetMode] = row.name || '';
-      setSource(row.id); setTab('calc'); setMessage(`${t('已自动填入工厂报价的采购单价、退税率、产品和交货地点，报价含明确数量时同步填入数量；请补充运费和汇率。')} ${t('进仓费承担方')}: ${row.warehouse || '待确认'} · ${t('港杂费承担方')}: ${row.portfee || '待确认'}`);
+      setSource(row.id); setTab('calc'); setMessage(`${t('已自动填入工厂报价的采购单价、退税率、产品和 CAS，报价含明确数量时同步填入数量；请补充交货地点、运费和汇率。')} ${t('进仓费承担方')}: ${row.warehouse || '待确认'} · ${t('港杂费承担方')}: ${row.portfee || '待确认'}`);
     }
     function selectFactory(id) {
       if (!id) { setSource(''); return; }
@@ -797,10 +979,8 @@ function createUI(React, ctx, t, css) {
       if (!currency) return null;
       const cas = normalizeCas(values?.cas), name = String(values?.product || '').trim();
       const rows = db.factories.filter(row => usableFactory(row) && row.currency === currency);
-      return rows.find(row => cas && normalizeCas(row.cas) === cas && (!name || row.name === name))
-        || rows.find(row => name && row.name === name)
-        || rows.find(row => cas && normalizeCas(row.cas) === cas)
-        || null;
+      const candidates = cas ? rows.filter(row => normalizeCas(row.cas) === cas) : rows;
+      return candidates.find(row => name && row.name === name) || (cas ? candidates[0] : null) || null;
     }
     function factoryForHistory(row) {
       if (!row) return null;
@@ -819,7 +999,8 @@ function createUI(React, ctx, t, css) {
     const credit = lookupCreditRate(v.quoteCountry, v.creditMonths, v.creditPayment);
     const ready = validateCalculation(v, mode);
     const currentFactory = mode === 'own' ? null : activeSource || matchFactory(v, mode);
-    const canExport = ready && Boolean(v.product?.trim()) && (mode === 'own' || Boolean(currentFactory));
+    const etdInvalid = !englishText(v.etd);
+    const canExport = ready && Boolean(v.product?.trim()) && (mode === 'own' || Boolean(currentFactory)) && !etdInvalid;
     const result = ready ? calculate(v, mode) : null;
     const high = ready && mode !== 'own' ? calculate({ ...v, sea: v.seaMax }, mode) : result;
     const ownHigh = ready && mode === 'own' ? calculate({ ...v, sea: v.seaMax }, 'own') : null;
@@ -840,8 +1021,8 @@ function createUI(React, ctx, t, css) {
       !(v.qty > 0) && '数量',
       !(Number.isFinite(v.sell) && v.sell >= 0) && '对客单价',
       !(v.receive > 0) && '收汇汇率',
-      !(Number.isFinite(v.sea) && v.sea >= 0) && '最低国际运费',
-      !(Number.isFinite(v.seaMax) && v.seaMax >= 0) && '最高国际运费',
+      !(Number.isFinite(v.sea) && (mode === 'usd' || v.sea >= 0)) && '最低国际运费',
+      !(Number.isFinite(v.seaMax) && (mode === 'usd' || v.seaMax >= 0)) && '最高国际运费',
       !(Number.isFinite(v.local) && v.local >= 0) && '国内费用',
       !(Number.isFinite(v.tax) && v.tax >= 0) && '增值税率',
       !validRebate(v.rebate) && '退税率'
@@ -852,7 +1033,8 @@ function createUI(React, ctx, t, css) {
       if (fcaReady) parts.push(metric('FCA 成本 USD/kg', fmt(fcaCost(v))));
       if (cfr != null) {
         parts.push(metric('C&F 成本 USD/kg', cfrHigh != null ? range(cfr, cfrHigh) : fmt(cfr)));
-        parts.push(note('C&F（CFR）成本含采购价、国内费用和国际运费，不含资金利息、货运险及信保费。'));
+        parts.push(note('C&F（CFR）成本、预计利润和利润率按最低 / 最高国际运费计算区间；最高与最低相同时为单值，不含资金利息、货运险及信保费。'));
+        if (cfrHigh == null && !(Number.isFinite(v.seaMax) && v.seaMax < v.sea)) parts.push(note('填写高于最低运费的「最高国际运费」后，C&F 成本、利润和利润率会显示区间。'));
         if (deduction > 0) parts.push(metric('盈亏平衡对客单价 USD/kg', range(cfr/deduction, (cfrHigh ?? cfr)/deduction)));
         if (Number.isFinite(v.seaMax) && v.seaMax < v.sea) parts.push(note('最高国际运费低于最低国际运费，请调整后才能保存。'));
       }
@@ -877,12 +1059,28 @@ function createUI(React, ctx, t, css) {
       }
       return parts;
     }
-    async function saveFactory() {
+    function openHistory(row, values, editingOriginal) {
+      focusCopiedDraft.current = !editingOriginal;
+      const monthsManual = values.months != null && Number.isFinite(values.creditMonths) && values.months !== values.creditMonths;
+      start(row.mode, values, monthsManual);
+      setHistorySource(editingOriginal ? row.id : null);
+      if (row.factoryId) setSource(row.factoryId);
+      setTab('calc');
+      setError('');
+      if (!editingOriginal) setMessage(t('已复制到新核算草稿，请确认后保存。'));
+    }
+    async function saveFactory(overwrite = true) {
+      const quantity = String(factory.quantity ?? '').trim();
+      if (quantity && !/^\d+$/.test(quantity)) throw Error('数量只能填写阿拉伯数字。');
       assertTextClean(factoryFields, factory);
-      const record = { ...factory, cas: normalizeCas(factory.cas), raw: pending.length ? factory.raw || factory.details || raw : raw };
+      const updating = Boolean(editing) && overwrite !== false;
       const original = editing ? db.factories.find(row => row.id === editing) : pending[index];
+      const parsed = pending.length > 0 && !original?.id;
+      const record = { ...factory, cas: normalizeCas(factory.cas), raw: parsed ? factory.raw || factory.details || raw : raw };
       for (const key of ['quoteDate','validity']) if (!record[key] && original?.[key] && !normalizeFactoryDate(original[key])) record[key] = original[key];
-      await mutate({ action: editing ? 'update' : 'add', kind: 'factories', ...(editing ? { id: editing } : {}), record });
+      await mutate({ action: updating ? 'update' : 'add', kind: 'factories', ...(updating ? { id: editing } : {}), record });
+      if (updating) setMessage('已覆盖原报价。');
+      else if (editing) setMessage('已另存为新的报价。');
       if (!editing && index + 1 < pending.length) { setIndex(index + 1); loadFactoryForm(pending[index + 1]); }
       else resetFactory();
     }
@@ -891,12 +1089,14 @@ function createUI(React, ctx, t, css) {
       const record = { mode, values: v, factoryId: currentFactory?.id ?? null };
       if (overwrite && historySource) {
         await mutate({ action: 'update', kind: 'history', id: historySource, record });
-        setMessage('已覆盖原核算记录。');
+        clearCalc();
+        setMessage('已覆盖原核算记录，核算页面已清空。');
       } else {
         const wasEditing = Boolean(historySource);
         await mutate({ action: 'add', kind: 'history', record });
-        setHistorySource(null);
-        if (wasEditing) setMessage('已另存为新的核算记录。');
+        clearCalc();
+        if (wasEditing) setMessage('已另存为新的核算记录，核算页面已清空。');
+        else setMessage('已保存，核算页面已清空。');
       }
     }
     async function exportBackup() {
@@ -926,6 +1126,7 @@ function createUI(React, ctx, t, css) {
         const factory = factoryForHistory(row);
         return { mode: row.mode, values: historyValues(row), ...(factory ? { factory, ...(factory.id ? { factoryId: factory.id } : {}) } : {}) };
       });
+      if (items.some(item => !englishText(item.values.etd))) throw Error('ETD 只能输入英文字符、数字和标点。');
       const file = await api({ action: 'quotation', includeCosting, items });
       downloadQuotation(file);
     }
@@ -946,7 +1147,11 @@ function createUI(React, ctx, t, css) {
             h('p', null, `数量：${row.quantity || '—'} · 装柜量 / 柜型：${row.loading || '—'} · 包装：${row.packing || '—'} · 交货期：${row.delivery || '—'}`),
             h('p', { className: 'qw-full-text' }, row.details || '暂无明细'),
             row.raw && row.raw !== row.details && h('p', { className: 'qw-full-text' }, row.raw))),
-        h('div', { className: 'qw-item-actions' }, button('带入核算', () => useFactory(row), { disabled: busy || !usableFactory(row) }), button('编辑', () => editFactory(row)), button('删除', () => remove('factories', row))));
+        h('div', { className: 'qw-item-actions' },
+          button('带入核算', () => useFactory(row), { disabled: busy || !usableFactory(row) }),
+          button('编辑', () => openFactory(row, true)),
+          button('复制', () => openFactory(row, false)),
+          button('删除', () => remove('factories', row))));
     }
     function freightRow(row) {
       const route = freightRoute(row), basis = freightBasis(row);
@@ -963,7 +1168,6 @@ function createUI(React, ctx, t, css) {
     function historyRow(row) {
       const a = row.result, values = historyValues(row);
       const b = row.highFreightResult || (Number.isFinite(values.seaMax) && values.seaMax > values.sea ? calculate({ ...values, sea: values.seaMax }, row.mode) : a);
-      const copyValues = values;
       const historyFactory = factoryForHistory(row);
       const factoryName = historyFactory?.factory || (row.mode === 'own' ? 'Own factory' : '未匹配工厂');
       return h('article', { key: row.id, className: 'qw-item' },
@@ -973,16 +1177,17 @@ function createUI(React, ctx, t, css) {
           h('p', { className: 'qw-item-meta' }, `工厂 ${factoryName} · ${row.values.place || '地点未记录'}`),
           row.mode === 'own'
             ? h('p', { className: 'qw-item-meta' }, `${t('人民币含税倒推价 RMB/kg')}: ${range(a.rmb,b.rmb)}`)
-            : h('p', { className: 'qw-item-meta' }, `${t('预计利润 USD')}: ${range(a.profit,b.profit)} · ${t('采购成本利润率')}: ${range(a.margin,b.margin,n => `${fmt(n*100)}%`)}`)),
+            : h('p', { className: 'qw-item-meta' }, `${t('C&F 成本 USD/kg')}: ${range(a.landed,b.landed)} · ${t('预计利润 USD')}: ${range(a.profit,b.profit)} · ${t('采购成本利润率')}: ${range(a.margin,b.margin,n => `${fmt(n*100)}%`)}`)),
         h('div', { className: 'qw-item-actions' },
           h('label', { className: 'qw-check qw-history-check', title: t('选择这条核算记录') }, h('input', { type: 'checkbox', checked: selectedHistory.includes(row.id), 'aria-label': `${t('选择')} ${row.values.product}`, onChange: e => setSelectedHistory(old => e.target.checked ? [...old, row.id] : old.filter(id => id !== row.id)) }), t('选择')),
-          button('查看 / 复制重算', () => { start(row.mode, copyValues, copyValues.months != null && Number.isFinite(copyValues.creditMonths) && copyValues.months !== copyValues.creditMonths); setHistorySource(row.id); if (row.factoryId) setSource(row.factoryId); setTab('calc'); }),
+          button('编辑', () => openHistory(row, values, true)),
+          button('复制', () => openHistory(row, values, false)),
           button('删除', () => remove('history', row))));
     }
     function pageFactory() {
       return h('div', { className: 'qw-body qw-factory' },
         h('section', { className: 'qw-card qw-form' },
-          h('div', { className: 'qw-card-head' }, h('h2', null, t('粘贴工厂报价')), h('span', { className: 'qw-badge' }, `${t('已保存')} ${db.factories.length}`)),
+          h('div', { className: 'qw-card-head' }, h('h2', { ref: draftFormRef, tabIndex: -1 }, t('粘贴工厂报价')), h('span', { className: 'qw-badge' }, `${t('已保存')} ${db.factories.length}`)),
           h('textarea', { rows: 3, value: raw, onChange: e => setRaw(e.target.value), placeholder: t('1390美金青岛，22t/20GP不打托，11月中交货'), 'aria-label': t('原始报价 / Excel 表格') }),
           h('div', { className: 'qw-toolbar' },
             button(parsing ? '正在解析…' : 'AI 提取字段', () => run(async () => {
@@ -995,8 +1200,8 @@ function createUI(React, ctx, t, css) {
               } finally { setParsing(false); }
             }), { className: 'qw-primary', disabled: busy || parsing }),
             button('规则提取', () => run(async () => { const records = parseQuotes(raw); acceptParsed(records); setMessage(records.length ? `规则已提取 ${records.length} 条报价，请核对字段；多价格和不明确的计价单位需手动确认。` : '没有识别到报价，请先粘贴报价文本。'); })),
-            pending.length > 0 && h('span', { className: 'qw-note' }, `${index + 1} / ${pending.length}`)),
-          editing && note('正在编辑已保存的报价；保存修改将保留原创建时间。'),
+            pending.length > 0 && !pending[index]?.id && h('span', { className: 'qw-note' }, `${index + 1} / ${pending.length}`)),
+          editing && note('正在编辑已保存的报价：可覆盖原报价，或另存为新报价；覆盖会保留原创建时间。'),
           h(Fields, { defs: ordered(factoryFields, factoryOrder), value: factory, onChange: changeFactory, wide: ['quality'] }),
           ['quoteDate','validity'].map(key => {
             const original = editing ? db.factories.find(row => row.id === editing)?.[key] : pending[index]?.[key];
@@ -1008,7 +1213,10 @@ function createUI(React, ctx, t, css) {
               : `原有效期：${original}（未填入新日期时保留原文）`);
           }),
           h('div', { className: 'qw-form-foot' },
-            button(editing ? '保存修改' : '确认并保存报价', () => run(saveFactory), { className: 'qw-primary' }),
+            editing
+              ? button('覆盖原报价', () => run(() => saveFactory(true)), { className: 'qw-primary' })
+              : button('确认并保存报价', () => run(() => saveFactory()), { className: 'qw-primary' }),
+            editing && button('另存为新报价', () => run(() => saveFactory(false))),
             editing && button('取消编辑', () => { resetFactory(); setMessage(''); }),
             note(parseModel?.label ? `解析模型：${parseModel.label}（可在 设置 → 报价工作台 修改）` : '未选择解析模型，请到 设置 → 报价工作台 配置；字段也可手动填写。'))),
         h('section', { className: 'qw-card qw-list' },
@@ -1117,19 +1325,33 @@ function createUI(React, ctx, t, css) {
           h('p', { className: 'qw-note' }, filtering ? `显示 ${rows.length} / ${db.history.length} 条记录；两项同时填写时须同时满足，均为包含关键词匹配。` : `共 ${db.history.length} 条记录；可按 CAS 或客户名称关键词筛选。`),
           rows.length ? rows.map(historyRow) : note(filtering ? '没有符合 CAS 或客户名称关键词的核算记录。' : '暂无核算记录')));
     }
+    function selectCalcProduct({ cas: productCas, name }) {
+      const cas = normalizeCas(productCas);
+      const changedCas = cas !== normalizeCas(v.cas);
+      if (changedCas) setSource('');
+      calcCache.used[mode] = true;
+      setV(old => {
+        // A different product needs a fresh purchase price and CAS-specific rates.
+        const values = changedCas && (old.cas || source)
+          ? { ...old, buy: null, tax: defaults.tax, rebate: defaults.rebate }
+          : old;
+        return { ...casFields(values, cas, 'product', 'calc'), product: name };
+      });
+    }
     function pageCalc() {
+      const productLookup = { products, onSelect: selectCalcProduct };
       const pick = (defs, ids) => ids.map(id => defs.find(([key]) => key === id)).filter(Boolean);
       const section = (title, ...children) => h('div', { className: 'qw-section' }, h('h3', null, t(title)), ...children);
       const productFields = pick([...basic, ...costs], ['product', 'cas', 'tax', 'rebate']);
       const factoryField = ['factory', '工厂', 'text'];
       const costFields = [factoryField, ...pick([...basic, ...costs], ['qty', 'buy', 'fx', 'receive', 'sea', 'seaMax', 'local'])];
       const costValues = { ...v, factory: currentFactory?.factory || '' };
-      const customerFields = pick(basic, ['customer', 'quoteCountry', 'sell', 'transportMode', 'customerTerm', 'place']);
+      const customerFields = pick(basic, ['customer', 'quoteCountry', 'sell', 'transportMode', 'customerTerm', 'place', 'etd']);
       const rateFields = pick([...basic, ...params], ['creditMonths', 'creditPayment', 'transport', 'credit', 'interest', 'months']);
       const monthsNote = note('资金占用月数默认同账期，可手动修改；手动修改后不再随账期变化。');
       const sections = mode === 'own'
         ? [
-            section('01 / 产品与报价', h(Fields, { defs: ordered(basic, basicOrder), value: v, onChange: change })),
+            section('01 / 产品与报价', h(Fields, { defs: ordered(basic, basicOrder), value: v, onChange: change, productLookup })),
             section('02 / 成本与参数',
               h(Fields, { defs: ordered([...costs, ...params], calcOrder), value: v, onChange: change, hidden: ['buy', 'fx'], labels: { sea: '最低国际运费 USD/票' } }),
               note('国内费用填写我方承担的完整总额，避免重复计入货代报价。'),
@@ -1138,7 +1360,7 @@ function createUI(React, ctx, t, css) {
           ]
         : [
             section('01 / 选取工厂报价',
-              h(Fields, { defs: productFields, value: v, onChange: change, className: 'qw-3col', spans: { product: 2 }, hidden: mode === 'usd' ? ['tax', 'rebate'] : [] }),
+              h(Fields, { defs: productFields, value: v, onChange: change, productLookup, className: 'qw-3col', spans: { product: 2 }, hidden: mode === 'usd' ? ['tax', 'rebate'] : [] }),
               mode === 'rmb' && note('增值税率和退税率按 CAS 绑定：输入有历史记录的 CAS 自动代入，保存核算后会记住该产品的税率。'),
               h('div', { className: 'qw-source' },
                 h('select', { 'aria-label': t('选取工厂报价'), value: activeSource ? source : '', disabled: !sources.length, onChange: e => selectFactory(e.target.value) },
@@ -1147,7 +1369,7 @@ function createUI(React, ctx, t, css) {
                 button('带入成本', () => useFactory(activeSource, true), { disabled: busy || !activeSource })),
               activeSource && note(`含量 / 纯度 ${activeSource.purity || '—'} · 其他关键质量指标 ${activeSource.quality || '—'} · 货物危险性 ${activeSource.hazard || '—'} · 工厂条款 ${activeSource.incoterm || '待确认'} · ${activeSource.port || '地点未记录'} · 进仓费承担方 ${activeSource.warehouse || '待确认'} · 港杂费承担方 ${activeSource.portfee || '待确认'}`)),
             section('02 / 工厂与运输成本',
-              h(Fields, { defs: costFields, value: costValues, onChange: change, className: 'qw-3col', disabled: ['factory'], hidden: mode === 'rmb' ? ['receive'] : [], labels: { buy: mode === 'rmb' ? '含税采购单价 RMB/kg' : '采购单价 USD/kg', fx: mode === 'rmb' ? '收汇汇率 RMB/USD' : '买汇 / 成本汇率 RMB/USD', sea: '最低国际运费 USD/票' } }),
+              h(Fields, { defs: costFields, value: costValues, onChange: change, signed: mode === 'usd' ? ['sea', 'seaMax'] : [], className: 'qw-3col', disabled: ['factory'], hidden: mode === 'rmb' ? ['receive'] : [], labels: { buy: mode === 'rmb' ? '含税采购单价 RMB/kg' : '采购单价 USD/kg', fx: mode === 'rmb' ? '收汇汇率 RMB/USD' : '买汇 / 成本汇率 RMB/USD', sea: '最低国际运费 USD/票' } }),
               note('国内费用填写我方承担的完整总额，避免重复计入货代报价。')),
             section('03 / 对客户报价',
               h(Fields, { defs: customerFields, value: v, onChange: change, className: 'qw-3col' })),
@@ -1155,10 +1377,10 @@ function createUI(React, ctx, t, css) {
               h(Fields, { defs: rateFields, value: v, onChange: change, className: 'qw-3col' }),
               monthsNote)
           ];
-      const exportHint = !ready ? '补全核算后可输出。' : !v.product?.trim() ? '请先填写产品名称。' : mode !== 'own' && !currentFactory ? '请先在 01 选择对应工厂报价。' : '生成英文 Quotation 和内部 Costing 工作表，可直接编辑。';
+      const exportHint = !ready ? '补全核算后可输出。' : !v.product?.trim() ? '请先填写产品名称。' : etdInvalid ? 'ETD 只能输入英文字符、数字和标点。' : mode !== 'own' && !currentFactory ? '请先在 01 选择对应工厂报价。' : '生成英文 Quotation 和内部 Costing 工作表，可直接编辑。';
       return h('div', { className: 'qw-body qw-calc' },
         h('section', { className: 'qw-card qw-form' },
-          h('div', { className: 'qw-card-head' }, h('h2', null, t('报价核算')), button('载入 Excel 样例', () => { setHistorySource(null); start(mode, samples[mode]); })),
+          h('div', { className: 'qw-card-head' }, h('h2', { ref: draftFormRef, tabIndex: -1 }, t('报价核算')), button('载入 Excel 样例', () => { setHistorySource(null); start(mode, samples[mode]); })),
           h('div', { className: 'qw-modes' }, ...[['rmb','人民币采购'],['usd','美元采购'],['own','自有工厂倒推']].map(([key,label]) => button(label, () => switchMode(key), { key, 'aria-pressed': mode === key }))),
           ...sections,
           h('div', { className: 'qw-form-foot' }, credit ? note(`${credit.group} 类 · ${credit.period} · 表列 ${credit.rate.toFixed(3)}%（2026–2027.6 费率表）`) : note(v.quoteCountry && v.creditPayment && v.creditMonths != null ? '当前国家、账期和付款方式没有匹配的信保费率，请核对条件或手动填写费率；不可按 0 处理。' : '选择国家、账期和付款方式自动带出信保费率，或直接手填；账期按每月 30 天计算。'))),
@@ -1194,18 +1416,80 @@ function createUI(React, ctx, t, css) {
             h('button', { type: 'button', title: t('缩小（Ctrl + -）'), 'aria-label': t('缩小'), disabled: zoom === zoomSteps[0], onClick: () => setZoom(current => stepZoom(current, -1)) }, 'A−'),
             h('button', { type: 'button', className: 'qw-zoom-value', title: t('恢复默认大小（Ctrl + 0）'), onClick: () => setZoom(1) }, `${Math.round(zoom * 100)}%`),
             h('button', { type: 'button', title: t('放大（Ctrl + =）'), 'aria-label': t('放大'), disabled: zoom === zoomSteps[zoomSteps.length - 1], onClick: () => setZoom(current => stepZoom(current, 1)) }, 'A+')),
-          button('刷新记录', () => run(async () => { setDb(await api({ action: 'list' })); setSelected([]); })),
+          button('刷新记录', () => run(async () => { setDb(await api({ action: 'list' })); setSelected([]); refreshSync(); })),
+          sync?.configured && button(sync.pending ? '同步飞书（有待同步）' : '同步飞书', () => run(async () => { setSync(await api({ action: 'syncNow' })); setDb(await api({ action: 'list' })); })),
           button('导出备份', () => run(exportBackup), { disabled: busy || !db }),
           button('导入备份', () => fileInput.current.click(), { disabled: busy || !db }),
           h('input', { ref: fileInput, hidden: true, type: 'file', accept: '.json,application/json', onChange: importBackup }))),
       h('nav', { className: 'qw-tabs', 'aria-label': t('报价工作台') }, ...[['factory','工厂报价'],['calc','报价核算'],['freight','货代报价'],['history','核算记录'],['products','产品目录']].map(([key,label]) => button(label, () => { setTab(key); setMessage(''); }, { key, 'aria-current': tab === key ? 'page' : undefined }))),
       (error || message) && h('div', { className: 'qw-alerts' }, error && h('p', { className: 'qw-error', role: 'alert' }, error), message && h('p', { className: 'qw-status', role: 'status' }, message)),
+      sync?.conflicts?.length ? h('div', { className: 'qw-alerts' }, h('p', { className: 'qw-error', role: 'alert' }, t('检测到飞书端与本地同时修改了以下记录，请选择保留哪一端：')),
+        sync.conflicts.map(c => h('div', { key: `${c.kind}:${c.id}`, className: 'qw-conflict' },
+          h('span', null, `${TABLE_LABELS[c.kind] || c.kind} · ${c.name || c.id}：${c.fields.map(f => t(FIELD_LABELS[f.key] || f.key)).join('、')}`),
+          h('span', { className: 'qw-conflict-actions' },
+            button('保留本地', () => run(async () => { setSync(await api({ action: 'syncResolve', kind: c.kind, id: c.id, choices: Object.fromEntries(c.fields.map(f => [f.key, 'local'])) })); }), { className: 'qw-mini' }),
+            button('采用远端', () => run(async () => { setSync(await api({ action: 'syncResolve', kind: c.kind, id: c.id, choices: Object.fromEntries(c.fields.map(f => [f.key, 'remote'])) })); setDb(await api({ action: 'list' })); }), { className: 'qw-mini' }))))) : null,
       body,
       h('p', { className: 'qw-foot-note' }, t('记录保存在 Harness 中；未保存的草稿在离开工作台后保留 5 分钟，超过 5 分钟未操作则清空。支持导入原工作台的 JSON 备份。'))));
   }
   function Settings() {
     useSyncExternalStore(fn => ctx.locale.subscribe(fn), () => ctx.locale.getSnapshot());
     const [state, setState] = useState(null), [choice, setChoice] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState(''), [status, setStatus] = useState('');
+    const [sync, setSync] = useState(null), [syncBusy, setSyncBusy] = useState(false), [syncMsg, setSyncMsg] = useState(''), [syncErr, setSyncErr] = useState('');
+    const [appId, setAppId] = useState(''), [appSecret, setAppSecret] = useState(''), [appToken, setAppToken] = useState(''), [enable, setEnable] = useState(false);
+    const [authCode, setAuthCode] = useState('');
+    function applySync(s) {
+      setSync(s);
+      if (s?.settings) { setAppToken(s.settings.appToken || ''); setEnable(Boolean(s.settings.enable)); }
+      // 已保存的 App ID 回填（App Secret 永不回传，留空表示沿用已保存值）。
+      if (s?.credential?.appId) setAppId(s.credential.appId);
+    }
+    async function loadSync() {
+      setSyncErr(''); setSyncMsg('');
+      try { applySync(await api({ action: 'syncStatus' })); } catch (e) { setSyncErr(e.message); }
+    }
+    async function saveSync() {
+      setSyncBusy(true); setSyncErr(''); setSyncMsg('');
+      try {
+        // 只有同时填了 App ID 和 App Secret 才提交新凭据；否则沿用已保存的（Secret 从不回填明文）。
+        const credential = appId && appSecret ? { appId, appSecret } : undefined;
+        const s = await api({ action: 'syncSetup', credential, appToken, enable });
+        applySync(s); setAppSecret('');
+        setSyncMsg(s?.warning ? `${t('配置已保存，但同步未就绪')}：${s.warning}` : t('飞书同步设置已保存，并已检查/创建数据表。'));
+      } catch (e) { setSyncErr(e.message); } finally { setSyncBusy(false); }
+    }
+    async function runSync() {
+      setSyncBusy(true); setSyncErr(''); setSyncMsg('');
+      try { applySync(await api({ action: 'syncNow' })); setSyncMsg(t('已完成一次全量拉取与推送。')); }
+      catch (e) { setSyncErr(e.message); } finally { setSyncBusy(false); }
+    }
+    async function startAuth() {
+      setSyncBusy(true); setSyncErr(''); setSyncMsg('');
+      try {
+        const base = (typeof location !== 'undefined' && location.origin) ? location.origin : '';
+        const { url } = await api({ action: 'syncAuthUrl', base });
+        // 新窗口打开飞书授权页。
+        if (typeof window !== 'undefined') window.open(url, '_blank', 'noopener');
+        else setSyncMsg(url);
+      } catch (e) { setSyncErr(e.message); } finally { setSyncBusy(false); }
+    }
+    async function submitAuthCode() {
+      setSyncBusy(true); setSyncErr(''); setSyncMsg('');
+      try {
+        // 用户可能粘贴整条回调 URL，从中提取 code。
+        const m = /[?&]code=([^&]+)/.exec(authCode);
+        const code = m ? decodeURIComponent(m[1]) : authCode.trim();
+        applySync(await api({ action: 'syncAuth', code }));
+        setAuthCode('');
+        setSyncMsg(t('飞书账号授权成功。'));
+      } catch (e) { setSyncErr(e.message); } finally { setSyncBusy(false); }
+    }
+    async function logoutAuth() {
+      setSyncBusy(true); setSyncErr(''); setSyncMsg('');
+      try { applySync(await api({ action: 'syncLogout' })); setSyncMsg(t('已退出飞书账号授权。')); }
+      catch (e) { setSyncErr(e.message); } finally { setSyncBusy(false); }
+    }
+    useEffect(() => { loadSync(); }, []);
     async function load() {
       setBusy(true); setError(''); setStatus('');
       try {
@@ -1245,6 +1529,35 @@ function createUI(React, ctx, t, css) {
           h('button', { type: 'button', disabled: busy, onClick: load }, t('刷新模型列表'))),
         error && h('p', { className: 'qw-settings-error', role: 'alert' }, error),
         status && h('p', { className: 'qw-settings-status', role: 'status' }, status),
+        h('hr', { className: 'qw-settings-sep' }),
+        h('h2', null, t('飞书同步')),
+        h('p', { className: 'qw-note' }, t('把工厂报价、货代报价、核算记录、产品目录同步到飞书多维表格（Bitable）。业务数据经飞书开放平台服务端接口读写，需先在飞书开放平台创建自建应用并开通多维表格权限。')),
+        h('label', { className: 'qw-settings-field' }, h('span', null, t('App ID')),
+          h('input', { type: 'text', value: appId, disabled: syncBusy, placeholder: t('飞书应用 App ID'), onChange: e => setAppId(e.target.value.trim()) })),
+        h('label', { className: 'qw-settings-field' }, h('span', null, t('App Secret')),
+          h('input', { type: 'password', value: appSecret, disabled: syncBusy, placeholder: sync?.credential?.configured ? t('已保存，留空则不修改') : t('飞书应用 App Secret'), onChange: e => setAppSecret(e.target.value.trim()) })),
+        h('label', { className: 'qw-settings-field' }, h('span', null, t('多维表格 app_token')),
+          h('input', { type: 'text', value: appToken, disabled: syncBusy, placeholder: t('多维表格 Base 的 app_token'), onChange: e => setAppToken(e.target.value.trim()) })),
+        h('label', { className: 'qw-check' }, h('input', { type: 'checkbox', checked: enable, disabled: syncBusy, onChange: e => setEnable(e.target.checked) }), t('启用飞书同步')),
+        h('h3', { className: 'qw-settings-subhead' }, t('个人账号授权')),
+        h('p', { className: 'qw-note' }, t('同步使用你本人的飞书账号身份。先保存上面的应用配置，再点击授权，登录飞书并同意后即可。此后你的修改会以你的名义写入多维表格的「最后修改人」列。')),
+        sync?.user?.authorized
+          ? h('div', { className: 'qw-settings-actions' },
+            h('span', { className: 'qw-note' }, `${t('当前已授权')}：${sync.user.name || sync.user.open_id}`),
+            h('button', { type: 'button', disabled: syncBusy, onClick: startAuth }, t('重新授权')),
+            h('button', { type: 'button', disabled: syncBusy, onClick: logoutAuth }, t('退出授权')))
+          : h('div', { className: 'qw-settings-actions' },
+            h('button', { type: 'button', className: 'qw-settings-primary', disabled: syncBusy || !sync?.credential?.configured, onClick: startAuth }, t('授权飞书账号'))),
+        h('label', { className: 'qw-settings-field' }, h('span', null, t('或粘贴授权码')),
+          h('input', { type: 'text', value: authCode, disabled: syncBusy, placeholder: t('从回调地址粘贴 code 或整条 URL'), onChange: e => setAuthCode(e.target.value) })),
+        h('div', { className: 'qw-settings-actions' },
+          h('button', { type: 'button', disabled: syncBusy || !authCode.trim(), onClick: submitAuthCode }, t('提交授权码'))),
+        sync && h('p', { className: 'qw-note' }, sync.configured ? t('飞书同步已就绪。') : t('飞书同步尚未配置完整（需 App ID、App Secret、app_token 与四张表）。')),
+        h('div', { className: 'qw-settings-actions' },
+          h('button', { type: 'button', className: 'qw-settings-primary', disabled: syncBusy, onClick: saveSync }, t('保存飞书设置')),
+          h('button', { type: 'button', disabled: syncBusy || !sync?.configured, onClick: runSync }, t('立即同步'))),
+        syncErr && h('p', { className: 'qw-settings-error', role: 'alert' }, syncErr),
+        syncMsg && h('p', { className: 'qw-settings-status', role: 'status' }, syncMsg),
         !state && !error && h('p', { className: 'qw-note' }, t('正在读取可用模型…')),
         state && h('p', { className: 'qw-note' }, state.effective ? `${t('当前生效')}：${state.effective.label}` : t('当前没有可用模型。请先在 Harness 设置里接入模型，或选择「跟随 Harness 默认模型」。')),
         state && !providers.length && h('p', { className: 'qw-note' }, t('没有发现已公布模型的提供方；仍可跟随 Harness 默认模型，或先到 设置 → 模型 接入模型。'))));
@@ -1253,13 +1566,13 @@ function createUI(React, ctx, t, css) {
 }
 
  return { inject: ['slots', 'locale'], apply(ctx) {
- const zh = {"海运整柜":"海运整柜","海运拼箱":"海运拼箱","空运":"空运","铁路":"铁路","公路":"公路","快递":"快递","其他":"其他","CAS 号":"CAS 号","运输方式":"运输方式","产品 / 规格":"产品 / 规格","客户":"客户","报价国家 / 地区":"报价国家 / 地区","账期（月）":"账期（月）","信保付款方式":"信保付款方式","D/A 或 O/A":"D/A 或 O/A","数量 kg":"数量 kg","对客单价 USD/kg":"对客单价 USD/kg","待确认":"待确认","交货地点 / 港口":"交货地点 / 港口","工厂采购单价":"工厂采购单价","买汇 / 成本汇率 RMB/USD":"买汇 / 成本汇率 RMB/USD","收汇汇率 RMB/USD":"收汇汇率 RMB/USD","国际运费 USD/票":"国际运费 USD/票","国内费用总额 RMB/票":"国内费用总额 RMB/票","增值税率 %":"增值税率 %","退税率 %":"退税率 %","运输保险费率 %":"运输保险费率 %","信用保险费率 %":"信用保险费率 %","年资金利率 %":"年资金利率 %","资金占用月数":"资金占用月数","报价日期":"报价日期","产品":"产品","含量 / 纯度":"含量 / 纯度","其他关键质量指标":"其他关键质量指标","货物危险性":"货物危险性","工厂":"工厂","报价明细":"报价明细","数量":"数量","报价有效期":"报价有效期","报价单价":"报价单价","币种":"币种","退税率 %（不退税填 0）":"退税率 %（不退税填 0）","计价单位":"计价单位","吨":"吨","公斤":"公斤","交货地点":"交货地点","装柜量 / 柜型":"装柜量 / 柜型","包装方式":"包装方式","交货期（含年份）":"交货期（含年份）","进仓费承担方":"进仓费承担方","我方":"我方","港杂费承担方":"港杂费承担方","产品名称":"产品名称","票":"票","否":"否","是":"是","货代名称":"货代名称","起运地":"起运地","目的地":"目的地","柜型":"柜型","询价数量":"询价数量","询价单位":"询价单位","是否抛货":"是否抛货","体积（CBM）":"体积（CBM）","有效期":"有效期","国内费用 RMB/票":"国内费用 RMB/票","最高国际运费 USD/票":"最高国际运费 USD/票","东帝汶":"东帝汶","荷属安地列斯群岛":"荷属安地列斯群岛","香港":"香港","澳门":"澳门","台湾":"台湾","巴勒斯坦":"巴勒斯坦","中国（买方/开证行参考）":"中国（买方/开证行参考）","塞卜泰（休达）":"塞卜泰（休达）","马约特岛":"马约特岛","加那利群岛":"加那利群岛","梅利利亚":"梅利利亚","博内尔":"博内尔","库腊索岛":"库腊索岛","萨巴":"萨巴","圣马丁岛":"圣马丁岛","盖比群岛":"盖比群岛","社会群岛":"社会群岛","土阿莫土群岛":"土阿莫土群岛","马恩岛":"马恩岛","诺曼底群岛":"诺曼底群岛","0–30 天":"0–30 天","31–60 天":"31–60 天","61–90 天":"61–90 天","91–180 天":"91–180 天","181 天–1 年":"181 天–1 年","1–2 年":"1–2 年","十":"十","天":"天","周":"周","个月":"个月","年":"年","记录必须是有效对象。":"记录必须是有效对象。","请填写产品名称和 CAS 号，格式如 67-68-5。":"请填写产品名称和 CAS 号，格式如 67-68-5。","货物危险性须为文本。":"货物危险性须为文本。","请填写 0–100 的增值税率。":"请填写 0–100 的增值税率。","请填写 0–100 的退税率。":"请填写 0–100 的退税率。","工厂报价须填写产品名称和有效正数价格。":"工厂报价须填写产品名称和有效正数价格。","工厂报价须确认币种和计价单位。":"工厂报价须确认币种和计价单位。","请填写 0–100 的退税率，不退税填 0。":"请填写 0–100 的退税率，不退税填 0。","货代报价须填写货代名称。":"货代报价须填写货代名称。","货代报价须分别填写起运地和目的地。":"货代报价须分别填写起运地和目的地。","货代报价须确认有效运输方式。":"货代报价须确认有效运输方式。","整柜报价须选择有效柜型。":"整柜报价须选择有效柜型。","拼箱或空运报价须填写询价数量。":"拼箱或空运报价须填写询价数量。","拼箱或空运报价须选择询价单位。":"拼箱或空运报价须选择询价单位。","拼箱报价须选择是否抛货。":"拼箱报价须选择是否抛货。","抛货报价须填写体积（CBM）。":"抛货报价须填写体积（CBM）。","货代报价须填写货代、路线和费用口径。":"货代报价须填写货代、路线和费用口径。","货代报价须填写有效日期（年-月-日）。":"货代报价须填写有效日期（年-月-日）。","运费和国内费用须为非负数，无费用填 0。":"运费和国内费用须为非负数，无费用填 0。","核算记录须包含有效模式、产品和核算数据。":"核算记录须包含有效模式、产品和核算数据。","核算记录中的数量、费用、汇率或退税率无效。":"核算记录中的数量、费用、汇率或退税率无效。","核算记录缺少有效计算结果。":"核算记录缺少有效计算结果。","核算记录的最高运费计算结果无效。":"核算记录的最高运费计算结果无效。","核算记录缺少有效保存时间。":"核算记录缺少有效保存时间。","未知记录类型。":"未知记录类型。","备份必须是有效数据对象。":"备份必须是有效数据对象。","备份须包含工厂报价、货代报价和核算记录数组。":"备份须包含工厂报价、货代报价和核算记录数组。","工厂报价":"工厂报价","货代报价":"货代报价","核算记录":"核算记录","产品目录须为数组。":"产品目录须为数组。","非危险品":"非危险品","(?:USD|RMB|CNY|人民币|美金|美元|元|[$￥¥])":"(?:USD|RMB|CNY|人民币|美金|美元|元|[$￥¥])","不打托":"不打托","CAS号":"CAS号","交货期":"交货期","含量":"含量","纯度":"纯度","含量/纯度":"含量/纯度","质量指标":"质量指标","危险性":"危险性","危险品":"危险品","危险货物":"危险货物","危险品类别":"危险品类别","危险品等级":"危险品等级","危险货物类别":"危险货物类别","未记录":"未记录","人民币采购":"人民币采购","美元采购":"美元采购","自有工厂倒推":"自有工厂倒推","未知操作":"未知操作","仅支持更新工厂报价":"仅支持更新工厂报价","仅支持更新工厂报价或产品":"仅支持更新工厂报价或产品","报价工作台服务端仍是旧版本，请完全退出并重启 Harness，或重新启用报价工作台插件后再试。":"报价工作台服务端仍是旧版本，请完全退出并重启 Harness，或重新启用报价工作台插件后再试。","请选择国家 / 地区":"请选择国家 / 地区","不能包含中文":"不能包含中文","正在编辑已保存的报价。":"正在编辑已保存的报价。","已保存。":"已保存。","同时导出内部成本页":"同时导出内部成本页","包含成本数据":"包含成本数据","请选择与当前采购币种及 CAS 相符的报价。":"请选择与当前采购币种及 CAS 相符的报价。","已自动填入工厂报价的采购单价、退税率、产品和交货地点，报价含明确数量时同步填入数量；请补充运费和汇率。":"已自动填入工厂报价的采购单价、退税率、产品和交货地点，报价含明确数量时同步填入数量；请补充运费和汇率。","删除这条记录？":"删除这条记录？","汇率":"汇率","采购单价":"采购单价","国际运费":"国际运费","国内费用":"国内费用","增值税率":"增值税率","退税率":"退税率","对客单价":"对客单价","收汇汇率":"收汇汇率","最低国际运费":"最低国际运费","最高国际运费":"最高国际运费","FCA 成本 USD/kg":"FCA 成本 USD/kg","C&F 成本 USD/kg":"C&F 成本 USD/kg","C&F（CFR）成本含采购价、国内费用和国际运费，不含资金利息、货运险及信保费。":"C&F（CFR）成本含采购价、国内费用和国际运费，不含资金利息、货运险及信保费。","盈亏平衡对客单价 USD/kg":"盈亏平衡对客单价 USD/kg","最高国际运费低于最低国际运费，请调整后才能保存。":"最高国际运费低于最低国际运费，请调整后才能保存。","人民币含税倒推价 RMB/kg":"人民币含税倒推价 RMB/kg","美元不含税倒推价 USD/kg":"美元不含税倒推价 USD/kg","按最低 / 最高国际运费计算倒推价区间；人民币含税倒推价按增值税率和退税率换算。":"按最低 / 最高国际运费计算倒推价区间；人民币含税倒推价按增值税率和退税率换算。","预计利润 USD":"预计利润 USD","采购成本利润率":"采购成本利润率","人民币利润 RMB":"人民币利润 RMB","运输保险 USD":"运输保险 USD","信用保险 USD":"信用保险 USD","资金占用 USD":"资金占用 USD","退税率不能达到 100% + 增值税率，请调整。":"退税率不能达到 100% + 增值税率，请调整。","最高国际运费不能低于最低国际运费，请调整。":"最高国际运费不能低于最低国际运费，请调整。","请补全数量、售价、汇率、费用和费率。无费用请填 0。":"请补全数量、售价、汇率、费用和费率。无费用请填 0。","请补全数量、单价、汇率、费用和费率。无费用请填 0，最高运费不得低于最低运费。":"请补全数量、单价、汇率、费用和费率。无费用请填 0，最高运费不得低于最低运费。","已覆盖原核算记录。":"已覆盖原核算记录。","已另存为新的核算记录。":"已另存为新的核算记录。","报价工作台备份.json":"报价工作台备份.json","包含内部成本页":"包含内部成本页","仅含客户 Quotation 页":"仅含客户 Quotation 页","请先在 01 选择对应工厂报价":"请先在 01 选择对应工厂报价","请先勾选要合并的核算记录":"请先勾选要合并的核算记录","备份超过 10 MB":"备份超过 10 MB","导入将替换全部记录，请确认已备份。":"导入将替换全部记录，请确认已备份。","完整报价明细":"完整报价明细","暂无明细":"暂无明细","带入核算":"带入核算","编辑":"编辑","删除":"删除","询价":"询价","口径未填写":"口径未填写","未匹配工厂":"未匹配工厂","地点未记录":"地点未记录","选择这条核算记录":"选择这条核算记录","选择":"选择","查看 / 复制重算":"查看 / 复制重算","粘贴工厂报价":"粘贴工厂报价","已保存":"已保存","1390美金青岛，22t/20GP不打托，11月中交货":"1390美金青岛，22t/20GP不打托，11月中交货","原始报价 / Excel 表格":"原始报价 / Excel 表格","正在解析…":"正在解析…","AI 提取字段":"AI 提取字段","模型没有从这段内容中识别到报价，请补充数量、价格、单位等信息或换一个模型。":"模型没有从这段内容中识别到报价，请补充数量、价格、单位等信息或换一个模型。","规则提取":"规则提取","没有识别到报价，请先粘贴报价文本。":"没有识别到报价，请先粘贴报价文本。","正在编辑已保存的报价；保存修改将保留原创建时间。":"正在编辑已保存的报价；保存修改将保留原创建时间。","保存修改":"保存修改","确认并保存报价":"确认并保存报价","取消编辑":"取消编辑","未选择解析模型，请到 设置 → 报价工作台 配置；字段也可手动填写。":"未选择解析模型，请到 设置 → 报价工作台 配置；字段也可手动填写。","已保存的工厂报价":"已保存的工厂报价","暂无工厂报价":"暂无工厂报价","该 CAS 号已在目录中。":"该 CAS 号已在目录中。","编辑产品":"编辑产品","新增产品":"新增产品","保存产品":"保存产品","来自报价的产品：CAS 已锁定；货物危险性、税率留空时继续按报价/核算自动取值，填写后以目录设置为准。":"来自报价的产品：CAS 已锁定；货物危险性、税率留空时继续按报价/核算自动取值，填写后以目录设置为准。","货物危险性留空时按该 CAS 最近一次工厂报价自动取值；税率留空时按核算或工厂报价自动取值；填写后以目录设置为准。":"货物危险性留空时按该 CAS 最近一次工厂报价自动取值；税率留空时按核算或工厂报价自动取值；填写后以目录设置为准。","目录同时包含手工产品及已保存报价中的产品；编辑来自报价的产品会保存一条目录覆盖，删除覆盖后恢复报价名称和货物危险性。":"目录同时包含手工产品及已保存报价中的产品；编辑来自报价的产品会保存一条目录覆盖，删除覆盖后恢复报价名称和货物危险性。","产品目录":"产品目录","搜索产品名称或 CAS":"搜索产品名称或 CAS","来自已保存报价":"来自已保存报价","带入工厂":"带入工厂","没有符合条件的产品。":"没有符合条件的产品。","新增货代报价":"新增货代报价","拼箱询价单位默认按重量；如为抛货，请选择「是」并填写体积（CBM）。":"拼箱询价单位默认按重量；如为抛货，请选择「是」并填写体积（CBM）。","整柜只需选择柜型；拼箱 / 空运需填写询价数量和单位。":"整柜只需选择柜型；拼箱 / 空运需填写询价数量和单位。","保存货代报价":"保存货代报价","货代报价比较":"货代报价比较","已选报价存在口径不一致、过期或数据不完整，无法计算均值。":"已选报价存在口径不一致、过期或数据不完整，无法计算均值。","国际运费 / 国内费用均值":"国际运费 / 国内费用均值","暂无货代报价":"暂无货代报价","勾选同一客户的核算记录后，可合并输出一张报价单。":"勾选同一客户的核算记录后，可合并输出一张报价单。","只能合并同一客户的记录；请检查所选记录的客户名称。":"只能合并同一客户的记录；请检查所选记录的客户名称。","CAS 关键词":"CAS 关键词","如 67-68 或 6768":"如 67-68 或 6768","按 CAS 筛选核算记录":"按 CAS 筛选核算记录","客户名称关键词":"客户名称关键词","如 STIM":"如 STIM","按客户名称筛选核算记录":"按客户名称筛选核算记录","清除筛选":"清除筛选","全选当前结果":"全选当前结果","清除选择":"清除选择","合并输出报价单":"合并输出报价单","没有符合 CAS 或客户名称关键词的核算记录。":"没有符合 CAS 或客户名称关键词的核算记录。","暂无核算记录":"暂无核算记录","资金占用月数默认同账期，可手动修改；手动修改后不再随账期变化。":"资金占用月数默认同账期，可手动修改；手动修改后不再随账期变化。","01 / 产品与报价":"01 / 产品与报价","02 / 成本与参数":"02 / 成本与参数","最低国际运费 USD/票":"最低国际运费 USD/票","国内费用填写我方承担的完整总额，避免重复计入货代报价。":"国内费用填写我方承担的完整总额，避免重复计入货代报价。","自有工厂倒推只需收汇汇率；人民币含税倒推价按增值税率和退税率换算。":"自有工厂倒推只需收汇汇率；人民币含税倒推价按增值税率和退税率换算。","01 / 选取工厂报价":"01 / 选取工厂报价","增值税率和退税率按 CAS 绑定：输入有历史记录的 CAS 自动代入，保存核算后会记住该产品的税率。":"增值税率和退税率按 CAS 绑定：输入有历史记录的 CAS 自动代入，保存核算后会记住该产品的税率。","选取工厂报价":"选取工厂报价","请选择已保存的工厂报价":"请选择已保存的工厂报价","暂无该 CAS 的可用工厂报价":"暂无该 CAS 的可用工厂报价","暂无可用的工厂报价":"暂无可用的工厂报价","未填写工厂":"未填写工厂","带入成本":"带入成本","02 / 工厂与运输成本":"02 / 工厂与运输成本","含税采购单价 RMB/kg":"含税采购单价 RMB/kg","采购单价 USD/kg":"采购单价 USD/kg","03 / 对客户报价":"03 / 对客户报价","04 / 其他费率、资金占用情况":"04 / 其他费率、资金占用情况","补全核算后可输出。":"补全核算后可输出。","请先填写产品名称。":"请先填写产品名称。","请先在 01 选择对应工厂报价。":"请先在 01 选择对应工厂报价。","生成英文 Quotation 和内部 Costing 工作表，可直接编辑。":"生成英文 Quotation 和内部 Costing 工作表，可直接编辑。","报价核算":"报价核算","载入 Excel 样例":"载入 Excel 样例","当前国家、账期和付款方式没有匹配的信保费率，请核对条件或手动填写费率；不可按 0 处理。":"当前国家、账期和付款方式没有匹配的信保费率，请核对条件或手动填写费率；不可按 0 处理。","选择国家、账期和付款方式自动带出信保费率，或直接手填；账期按每月 30 天计算。":"选择国家、账期和付款方式自动带出信保费率，或直接手填；账期按每月 30 天计算。","本次核算":"本次核算","输出报价单":"输出报价单","生成可编辑的英文 Excel 报价单":"生成可编辑的英文 Excel 报价单","正在编辑历史记录：可另存为新记录，或覆盖原记录。":"正在编辑历史记录：可另存为新记录，或覆盖原记录。","另存为新记录":"另存为新记录","保存本次核算":"保存本次核算","覆盖原记录":"覆盖原记录","沿用原工作台的保险、资金利息及倒推公式；导出的工作簿包含英文 Quotation 和内部 Costing 两个可编辑工作表。":"沿用原工作台的保险、资金利息及倒推公式；导出的工作簿包含英文 Quotation 和内部 Costing 两个可编辑工作表。","报价工作台":"报价工作台","正在加载报价记录…":"正在加载报价记录…","采购 · 物流 · 利润":"采购 · 物流 · 利润","界面缩放":"界面缩放","缩小（Ctrl + -）":"缩小（Ctrl + -）","缩小":"缩小","恢复默认大小（Ctrl + 0）":"恢复默认大小（Ctrl + 0）","放大（Ctrl + =）":"放大（Ctrl + =）","放大":"放大","刷新记录":"刷新记录","导出备份":"导出备份","导入备份":"导入备份","记录保存在 Harness 中；未保存的草稿在离开工作台后保留 5 分钟，超过 5 分钟未操作则清空。支持导入原工作台的 JSON 备份。":"记录保存在 Harness 中；未保存的草稿在离开工作台后保留 5 分钟，超过 5 分钟未操作则清空。支持导入原工作台的 JSON 备份。","已保存，下一次解析立即生效。":"已保存，下一次解析立即生效。","AI 报价解析":"AI 报价解析","粘贴工厂报价时，用来提取产品、价格、单位、条款等字段的大模型。列表来自当前 Harness 已接入的提供方与模型。":"粘贴工厂报价时，用来提取产品、价格、单位、条款等字段的大模型。列表来自当前 Harness 已接入的提供方与模型。","解析模型":"解析模型","跟随 Harness 默认模型":"跟随 Harness 默认模型","保存":"保存","刷新模型列表":"刷新模型列表","正在读取可用模型…":"正在读取可用模型…","当前生效":"当前生效","当前没有可用模型。请先在 Harness 设置里接入模型，或选择「跟随 Harness 默认模型」。":"当前没有可用模型。请先在 Harness 设置里接入模型，或选择「跟随 Harness 默认模型」。","没有发现已公布模型的提供方；仍可跟随 Harness 默认模型，或先到 设置 → 模型 接入模型。":"没有发现已公布模型的提供方；仍可跟随 Harness 默认模型，或先到 设置 → 模型 接入模型。"};
- const en = {"海运整柜":"海运整柜","海运拼箱":"海运拼箱","空运":"空运","铁路":"铁路","公路":"公路","快递":"快递","其他":"其他","CAS 号":"CAS 号","运输方式":"运输方式","产品 / 规格":"产品 / 规格","客户":"客户","报价国家 / 地区":"报价国家 / 地区","账期（月）":"账期（月）","信保付款方式":"信保付款方式","D/A 或 O/A":"D/A 或 O/A","数量 kg":"数量 kg","对客单价 USD/kg":"对客单价 USD/kg","待确认":"待确认","交货地点 / 港口":"交货地点 / 港口","工厂采购单价":"工厂采购单价","买汇 / 成本汇率 RMB/USD":"买汇 / 成本汇率 RMB/USD","收汇汇率 RMB/USD":"收汇汇率 RMB/USD","国际运费 USD/票":"国际运费 USD/票","国内费用总额 RMB/票":"国内费用总额 RMB/票","增值税率 %":"增值税率 %","退税率 %":"退税率 %","运输保险费率 %":"运输保险费率 %","信用保险费率 %":"信用保险费率 %","年资金利率 %":"年资金利率 %","资金占用月数":"资金占用月数","报价日期":"报价日期","产品":"产品","含量 / 纯度":"Content / purity","其他关键质量指标":"Other key quality indicators","货物危险性":"货物危险性","工厂":"工厂","报价明细":"报价明细","数量":"数量","报价有效期":"报价有效期","报价单价":"报价单价","币种":"币种","退税率 %（不退税填 0）":"退税率 %（不退税填 0）","计价单位":"计价单位","吨":"吨","公斤":"公斤","交货地点":"交货地点","装柜量 / 柜型":"装柜量 / 柜型","包装方式":"包装方式","交货期（含年份）":"交货期（含年份）","进仓费承担方":"进仓费承担方","我方":"我方","港杂费承担方":"港杂费承担方","产品名称":"产品名称","票":"票","否":"否","是":"是","货代名称":"货代名称","起运地":"起运地","目的地":"目的地","柜型":"柜型","询价数量":"询价数量","询价单位":"询价单位","是否抛货":"是否抛货","体积（CBM）":"体积（CBM）","有效期":"有效期","国内费用 RMB/票":"国内费用 RMB/票","最高国际运费 USD/票":"最高国际运费 USD/票","东帝汶":"东帝汶","荷属安地列斯群岛":"荷属安地列斯群岛","香港":"香港","澳门":"澳门","台湾":"台湾","巴勒斯坦":"巴勒斯坦","中国（买方/开证行参考）":"中国（买方/开证行参考）","塞卜泰（休达）":"塞卜泰（休达）","马约特岛":"马约特岛","加那利群岛":"加那利群岛","梅利利亚":"梅利利亚","博内尔":"博内尔","库腊索岛":"库腊索岛","萨巴":"萨巴","圣马丁岛":"圣马丁岛","盖比群岛":"盖比群岛","社会群岛":"社会群岛","土阿莫土群岛":"土阿莫土群岛","马恩岛":"马恩岛","诺曼底群岛":"诺曼底群岛","0–30 天":"0–30 天","31–60 天":"31–60 天","61–90 天":"61–90 天","91–180 天":"91–180 天","181 天–1 年":"181 天–1 年","1–2 年":"1–2 年","十":"十","天":"天","周":"周","个月":"个月","年":"年","记录必须是有效对象。":"记录必须是有效对象。","请填写产品名称和 CAS 号，格式如 67-68-5。":"请填写产品名称和 CAS 号，格式如 67-68-5。","货物危险性须为文本。":"货物危险性须为文本。","请填写 0–100 的增值税率。":"请填写 0–100 的增值税率。","请填写 0–100 的退税率。":"请填写 0–100 的退税率。","工厂报价须填写产品名称和有效正数价格。":"工厂报价须填写产品名称和有效正数价格。","工厂报价须确认币种和计价单位。":"工厂报价须确认币种和计价单位。","请填写 0–100 的退税率，不退税填 0。":"请填写 0–100 的退税率，不退税填 0。","货代报价须填写货代名称。":"货代报价须填写货代名称。","货代报价须分别填写起运地和目的地。":"货代报价须分别填写起运地和目的地。","货代报价须确认有效运输方式。":"货代报价须确认有效运输方式。","整柜报价须选择有效柜型。":"整柜报价须选择有效柜型。","拼箱或空运报价须填写询价数量。":"拼箱或空运报价须填写询价数量。","拼箱或空运报价须选择询价单位。":"拼箱或空运报价须选择询价单位。","拼箱报价须选择是否抛货。":"拼箱报价须选择是否抛货。","抛货报价须填写体积（CBM）。":"抛货报价须填写体积（CBM）。","货代报价须填写货代、路线和费用口径。":"货代报价须填写货代、路线和费用口径。","货代报价须填写有效日期（年-月-日）。":"货代报价须填写有效日期（年-月-日）。","运费和国内费用须为非负数，无费用填 0。":"运费和国内费用须为非负数，无费用填 0。","核算记录须包含有效模式、产品和核算数据。":"核算记录须包含有效模式、产品和核算数据。","核算记录中的数量、费用、汇率或退税率无效。":"核算记录中的数量、费用、汇率或退税率无效。","核算记录缺少有效计算结果。":"核算记录缺少有效计算结果。","核算记录的最高运费计算结果无效。":"核算记录的最高运费计算结果无效。","核算记录缺少有效保存时间。":"核算记录缺少有效保存时间。","未知记录类型。":"未知记录类型。","备份必须是有效数据对象。":"备份必须是有效数据对象。","备份须包含工厂报价、货代报价和核算记录数组。":"备份须包含工厂报价、货代报价和核算记录数组。","工厂报价":"Supplier quotes","货代报价":"Freight quotes","核算记录":"Calculation history","产品目录须为数组。":"产品目录须为数组。","非危险品":"非危险品","(?:USD|RMB|CNY|人民币|美金|美元|元|[$￥¥])":"(?:USD|RMB|CNY|人民币|美金|美元|元|[$￥¥])","不打托":"不打托","CAS号":"CAS号","交货期":"交货期","含量":"含量","纯度":"纯度","含量/纯度":"含量/纯度","质量指标":"质量指标","危险性":"危险性","危险品":"危险品","危险货物":"危险货物","危险品类别":"危险品类别","危险品等级":"危险品等级","危险货物类别":"危险货物类别","未记录":"未记录","人民币采购":"RMB procurement","美元采购":"USD procurement","自有工厂倒推":"Factory price reverse calculation","未知操作":"未知操作","仅支持更新工厂报价":"仅支持更新工厂报价","仅支持更新工厂报价或产品":"仅支持更新工厂报价或产品","报价工作台服务端仍是旧版本，请完全退出并重启 Harness，或重新启用报价工作台插件后再试。":"The quote workbench server is still running an older version. Fully quit and restart Harness, or re-enable the quote workbench plugin, then try again.","请选择国家 / 地区":"请选择国家 / 地区","不能包含中文":"Chinese characters are not allowed","正在编辑已保存的报价。":"正在编辑已保存的报价。","已保存。":"已保存。","同时导出内部成本页":"Also export internal costing sheets","包含成本数据":"Include costing data","请选择与当前采购币种及 CAS 相符的报价。":"请选择与当前采购币种及 CAS 相符的报价。","已自动填入工厂报价的采购单价、退税率、产品和交货地点，报价含明确数量时同步填入数量；请补充运费和汇率。":"Filled the quote price, rebate, product and delivery place, plus quantity when the quote states it. Add freight and FX.","删除这条记录？":"删除这条记录？","汇率":"汇率","采购单价":"采购单价","国际运费":"国际运费","国内费用":"国内费用","增值税率":"增值税率","退税率":"退税率","对客单价":"对客单价","收汇汇率":"收汇汇率","最低国际运费":"最低国际运费","最高国际运费":"最高国际运费","FCA 成本 USD/kg":"FCA 成本 USD/kg","C&F 成本 USD/kg":"C&F 成本 USD/kg","C&F（CFR）成本含采购价、国内费用和国际运费，不含资金利息、货运险及信保费。":"C&F（CFR）成本含采购价、国内费用和国际运费，不含资金利息、货运险及信保费。","盈亏平衡对客单价 USD/kg":"盈亏平衡对客单价 USD/kg","最高国际运费低于最低国际运费，请调整后才能保存。":"最高国际运费低于最低国际运费，请调整后才能保存。","人民币含税倒推价 RMB/kg":"人民币含税倒推价 RMB/kg","美元不含税倒推价 USD/kg":"美元不含税倒推价 USD/kg","按最低 / 最高国际运费计算倒推价区间；人民币含税倒推价按增值税率和退税率换算。":"按最低 / 最高国际运费计算倒推价区间；人民币含税倒推价按增值税率和退税率换算。","预计利润 USD":"预计利润 USD","采购成本利润率":"采购成本利润率","人民币利润 RMB":"人民币利润 RMB","运输保险 USD":"运输保险 USD","信用保险 USD":"信用保险 USD","资金占用 USD":"资金占用 USD","退税率不能达到 100% + 增值税率，请调整。":"退税率不能达到 100% + 增值税率，请调整。","最高国际运费不能低于最低国际运费，请调整。":"最高国际运费不能低于最低国际运费，请调整。","请补全数量、售价、汇率、费用和费率。无费用请填 0。":"请补全数量、售价、汇率、费用和费率。无费用请填 0。","请补全数量、单价、汇率、费用和费率。无费用请填 0，最高运费不得低于最低运费。":"请补全数量、单价、汇率、费用和费率。无费用请填 0，最高运费不得低于最低运费。","已覆盖原核算记录。":"已覆盖原核算记录。","已另存为新的核算记录。":"已另存为新的核算记录。","报价工作台备份.json":"报价工作台备份.json","包含内部成本页":"包含内部成本页","仅含客户 Quotation 页":"仅含客户 Quotation 页","请先在 01 选择对应工厂报价":"请先在 01 选择对应工厂报价","请先勾选要合并的核算记录":"请先勾选要合并的核算记录","备份超过 10 MB":"备份超过 10 MB","导入将替换全部记录，请确认已备份。":"导入将替换全部记录，请确认已备份。","完整报价明细":"完整报价明细","暂无明细":"暂无明细","带入核算":"Use in calculation","编辑":"编辑","删除":"Delete","询价":"询价","口径未填写":"口径未填写","未匹配工厂":"No matching factory","地点未记录":"地点未记录","选择这条核算记录":"Select this calculation","选择":"Select","查看 / 复制重算":"查看 / 复制重算","粘贴工厂报价":"粘贴工厂报价","已保存":"Saved","1390美金青岛，22t/20GP不打托，11月中交货":"1390美金青岛，22t/20GP不打托，11月中交货","原始报价 / Excel 表格":"原始报价 / Excel 表格","正在解析…":"Parsing…","AI 提取字段":"Extract with AI","模型没有从这段内容中识别到报价，请补充数量、价格、单位等信息或换一个模型。":"模型没有从这段内容中识别到报价，请补充数量、价格、单位等信息或换一个模型。","规则提取":"规则提取","没有识别到报价，请先粘贴报价文本。":"没有识别到报价，请先粘贴报价文本。","正在编辑已保存的报价；保存修改将保留原创建时间。":"正在编辑已保存的报价；保存修改将保留原创建时间。","保存修改":"保存修改","确认并保存报价":"确认并保存报价","取消编辑":"取消编辑","未选择解析模型，请到 设置 → 报价工作台 配置；字段也可手动填写。":"未选择解析模型，请到 设置 → 报价工作台 配置；字段也可手动填写。","已保存的工厂报价":"已保存的工厂报价","暂无工厂报价":"暂无工厂报价","该 CAS 号已在目录中。":"该 CAS 号已在目录中。","编辑产品":"编辑产品","新增产品":"新增产品","保存产品":"保存产品","来自报价的产品：CAS 已锁定；货物危险性、税率留空时继续按报价/核算自动取值，填写后以目录设置为准。":"来自报价的产品：CAS 已锁定；货物危险性、税率留空时继续按报价/核算自动取值，填写后以目录设置为准。","货物危险性留空时按该 CAS 最近一次工厂报价自动取值；税率留空时按核算或工厂报价自动取值；填写后以目录设置为准。":"货物危险性留空时按该 CAS 最近一次工厂报价自动取值；税率留空时按核算或工厂报价自动取值；填写后以目录设置为准。","目录同时包含手工产品及已保存报价中的产品；编辑来自报价的产品会保存一条目录覆盖，删除覆盖后恢复报价名称和货物危险性。":"目录同时包含手工产品及已保存报价中的产品；编辑来自报价的产品会保存一条目录覆盖，删除覆盖后恢复报价名称和货物危险性。","产品目录":"产品目录","搜索产品名称或 CAS":"搜索产品名称或 CAS","来自已保存报价":"来自已保存报价","带入工厂":"带入工厂","没有符合条件的产品。":"没有符合条件的产品。","新增货代报价":"新增货代报价","拼箱询价单位默认按重量；如为抛货，请选择「是」并填写体积（CBM）。":"拼箱询价单位默认按重量；如为抛货，请选择「是」并填写体积（CBM）。","整柜只需选择柜型；拼箱 / 空运需填写询价数量和单位。":"整柜只需选择柜型；拼箱 / 空运需填写询价数量和单位。","保存货代报价":"保存货代报价","货代报价比较":"货代报价比较","已选报价存在口径不一致、过期或数据不完整，无法计算均值。":"已选报价存在口径不一致、过期或数据不完整，无法计算均值。","国际运费 / 国内费用均值":"国际运费 / 国内费用均值","暂无货代报价":"暂无货代报价","勾选同一客户的核算记录后，可合并输出一张报价单。":"Select calculations for the same customer to merge them into one quotation.","只能合并同一客户的记录；请检查所选记录的客户名称。":"Only calculations for the same customer can be merged. Check the selected customer names.","CAS 关键词":"CAS keyword","如 67-68 或 6768":"e.g. 67-68 or 6768","按 CAS 筛选核算记录":"Filter history by CAS","客户名称关键词":"Customer keyword","如 STIM":"e.g. STIM","按客户名称筛选核算记录":"Filter history by customer","清除筛选":"Clear filters","全选当前结果":"Select current results","清除选择":"Clear selection","合并输出报价单":"Merge quotation","没有符合 CAS 或客户名称关键词的核算记录。":"没有符合 CAS 或客户名称关键词的核算记录。","暂无核算记录":"暂无核算记录","资金占用月数默认同账期，可手动修改；手动修改后不再随账期变化。":"资金占用月数默认同账期，可手动修改；手动修改后不再随账期变化。","01 / 产品与报价":"01 / 产品与报价","02 / 成本与参数":"02 / 成本与参数","最低国际运费 USD/票":"最低国际运费 USD/票","国内费用填写我方承担的完整总额，避免重复计入货代报价。":"国内费用填写我方承担的完整总额，避免重复计入货代报价。","自有工厂倒推只需收汇汇率；人民币含税倒推价按增值税率和退税率换算。":"自有工厂倒推只需收汇汇率；人民币含税倒推价按增值税率和退税率换算。","01 / 选取工厂报价":"01 / 选取工厂报价","增值税率和退税率按 CAS 绑定：输入有历史记录的 CAS 自动代入，保存核算后会记住该产品的税率。":"增值税率和退税率按 CAS 绑定：输入有历史记录的 CAS 自动代入，保存核算后会记住该产品的税率。","选取工厂报价":"选取工厂报价","请选择已保存的工厂报价":"请选择已保存的工厂报价","暂无该 CAS 的可用工厂报价":"暂无该 CAS 的可用工厂报价","暂无可用的工厂报价":"暂无可用的工厂报价","未填写工厂":"未填写工厂","带入成本":"带入成本","02 / 工厂与运输成本":"02 / 工厂与运输成本","含税采购单价 RMB/kg":"含税采购单价 RMB/kg","采购单价 USD/kg":"采购单价 USD/kg","03 / 对客户报价":"03 / 对客户报价","04 / 其他费率、资金占用情况":"04 / 其他费率、资金占用情况","补全核算后可输出。":"补全核算后可输出。","请先填写产品名称。":"Enter a product name first.","请先在 01 选择对应工厂报价。":"Select the matching factory quote in step 01 first.","生成英文 Quotation 和内部 Costing 工作表，可直接编辑。":"Creates editable English Quotation and internal Costing sheets.","报价核算":"Quote calculation","载入 Excel 样例":"载入 Excel 样例","当前国家、账期和付款方式没有匹配的信保费率，请核对条件或手动填写费率；不可按 0 处理。":"当前国家、账期和付款方式没有匹配的信保费率，请核对条件或手动填写费率；不可按 0 处理。","选择国家、账期和付款方式自动带出信保费率，或直接手填；账期按每月 30 天计算。":"选择国家、账期和付款方式自动带出信保费率，或直接手填；账期按每月 30 天计算。","本次核算":"本次核算","输出报价单":"Export quotation","生成可编辑的英文 Excel 报价单":"Create an editable English Excel quotation","正在编辑历史记录：可另存为新记录，或覆盖原记录。":"正在编辑历史记录：可另存为新记录，或覆盖原记录。","另存为新记录":"另存为新记录","保存本次核算":"保存本次核算","覆盖原记录":"覆盖原记录","沿用原工作台的保险、资金利息及倒推公式；导出的工作簿包含英文 Quotation 和内部 Costing 两个可编辑工作表。":"Same insurance, interest and reverse-calculation formulas as before; the workbook has editable English Quotation and internal Costing sheets.","报价工作台":"Quote workbench","正在加载报价记录…":"正在加载报价记录…","采购 · 物流 · 利润":"采购 · 物流 · 利润","界面缩放":"Interface zoom","缩小（Ctrl + -）":"Zoom out (Ctrl + -)","缩小":"Zoom out","恢复默认大小（Ctrl + 0）":"Reset size (Ctrl + 0)","放大（Ctrl + =）":"Zoom in (Ctrl + =)","放大":"Zoom in","刷新记录":"Refresh records","导出备份":"Export backup","导入备份":"Import backup","记录保存在 Harness 中；未保存的草稿在离开工作台后保留 5 分钟，超过 5 分钟未操作则清空。支持导入原工作台的 JSON 备份。":"记录保存在 Harness 中；未保存的草稿在离开工作台后保留 5 分钟，超过 5 分钟未操作则清空。支持导入原工作台的 JSON 备份。","已保存，下一次解析立即生效。":"Saved. The next parse uses it immediately.","AI 报价解析":"AI quote parsing","粘贴工厂报价时，用来提取产品、价格、单位、条款等字段的大模型。列表来自当前 Harness 已接入的提供方与模型。":"粘贴工厂报价时，用来提取产品、价格、单位、条款等字段的大模型。列表来自当前 Harness 已接入的提供方与模型。","解析模型":"Parsing model","跟随 Harness 默认模型":"Use the Harness default model","保存":"Save","刷新模型列表":"Refresh model list","正在读取可用模型…":"Loading available models…","当前生效":"In effect","当前没有可用模型。请先在 Harness 设置里接入模型，或选择「跟随 Harness 默认模型」。":"当前没有可用模型。请先在 Harness 设置里接入模型，或选择「跟随 Harness 默认模型」。","没有发现已公布模型的提供方；仍可跟随 Harness 默认模型，或先到 设置 → 模型 接入模型。":"没有发现已公布模型的提供方；仍可跟随 Harness 默认模型，或先到 设置 → 模型 接入模型。","导出 Excel 报价单":"Export Excel quotation","沿用原工作台的保险、资金利息及倒推公式；导出的工作簿包含「报价单」和「成本核算」两个可编辑工作表。":"Same insurance, interest and reverse-calculation formulas as before; the workbook has editable “Quotation” and “Costing” sheets."};
+ const zh = {"海运整柜":"海运整柜","海运拼箱":"海运拼箱","空运":"空运","铁路":"铁路","公路":"公路","快递":"快递","其他":"其他","CAS 号":"CAS 号","运输方式":"运输方式","产品 / 规格":"产品 / 规格","客户":"客户","报价国家 / 地区":"报价国家 / 地区","账期（月）":"账期（月）","信保付款方式":"信保付款方式","D/A 或 O/A":"D/A 或 O/A","数量 kg":"数量 kg","对客单价 USD/kg":"对客单价 USD/kg","待确认":"待确认","交货地点 / 港口":"交货地点 / 港口","ETD（预计开船日）":"ETD（预计开船日）","工厂采购单价":"工厂采购单价","买汇 / 成本汇率 RMB/USD":"买汇 / 成本汇率 RMB/USD","收汇汇率 RMB/USD":"收汇汇率 RMB/USD","国际运费 USD/票":"国际运费 USD/票","国内费用总额 RMB/票":"国内费用总额 RMB/票","增值税率 %":"增值税率 %","退税率 %":"退税率 %","运输保险费率 %":"运输保险费率 %","信用保险费率 %":"信用保险费率 %","年资金利率 %":"年资金利率 %","资金占用月数":"资金占用月数","报价日期":"报价日期","产品":"产品","含量 / 纯度":"含量 / 纯度","其他关键质量指标":"其他关键质量指标","货物危险性":"货物危险性","工厂":"工厂","报价明细":"报价明细","数量":"数量","报价有效期":"报价有效期","报价单价":"报价单价","币种":"币种","退税率 %（不退税填 0）":"退税率 %（不退税填 0）","计价单位":"计价单位","吨":"吨","公斤":"公斤","交货地点":"交货地点","装柜量 / 柜型":"装柜量 / 柜型","包装方式":"包装方式","交货期（含年份）":"交货期（含年份）","进仓费承担方":"进仓费承担方","我方":"我方","港杂费承担方":"港杂费承担方","产品名称":"产品名称","票":"票","否":"否","是":"是","货代名称":"货代名称","起运地":"起运地","目的地":"目的地","柜型":"柜型","询价数量":"询价数量","询价单位":"询价单位","是否抛货":"是否抛货","体积（CBM）":"体积（CBM）","有效期":"有效期","国内费用 RMB/票":"国内费用 RMB/票","最高国际运费 USD/票":"最高国际运费 USD/票","东帝汶":"东帝汶","荷属安地列斯群岛":"荷属安地列斯群岛","香港":"香港","澳门":"澳门","台湾":"台湾","巴勒斯坦":"巴勒斯坦","中国（买方/开证行参考）":"中国（买方/开证行参考）","塞卜泰（休达）":"塞卜泰（休达）","马约特岛":"马约特岛","加那利群岛":"加那利群岛","梅利利亚":"梅利利亚","博内尔":"博内尔","库腊索岛":"库腊索岛","萨巴":"萨巴","圣马丁岛":"圣马丁岛","盖比群岛":"盖比群岛","社会群岛":"社会群岛","土阿莫土群岛":"土阿莫土群岛","马恩岛":"马恩岛","诺曼底群岛":"诺曼底群岛","0–30 天":"0–30 天","31–60 天":"31–60 天","61–90 天":"61–90 天","91–180 天":"91–180 天","181 天–1 年":"181 天–1 年","1–2 年":"1–2 年","十":"十","天":"天","周":"周","个月":"个月","年":"年","记录必须是有效对象。":"记录必须是有效对象。","请填写产品名称和 CAS 号，格式如 67-68-5。":"请填写产品名称和 CAS 号，格式如 67-68-5。","货物危险性须为文本。":"货物危险性须为文本。","请填写 0–100 的增值税率。":"请填写 0–100 的增值税率。","请填写 0–100 的退税率。":"请填写 0–100 的退税率。","工厂报价须填写产品名称和有效正数价格。":"工厂报价须填写产品名称和有效正数价格。","工厂报价须确认币种和计价单位。":"工厂报价须确认币种和计价单位。","请填写 0–100 的退税率，不退税填 0。":"请填写 0–100 的退税率，不退税填 0。","货代报价须填写货代名称。":"货代报价须填写货代名称。","货代报价须分别填写起运地和目的地。":"货代报价须分别填写起运地和目的地。","货代报价须确认有效运输方式。":"货代报价须确认有效运输方式。","整柜报价须选择有效柜型。":"整柜报价须选择有效柜型。","拼箱或空运报价须填写询价数量。":"拼箱或空运报价须填写询价数量。","拼箱或空运报价须选择询价单位。":"拼箱或空运报价须选择询价单位。","拼箱报价须选择是否抛货。":"拼箱报价须选择是否抛货。","抛货报价须填写体积（CBM）。":"抛货报价须填写体积（CBM）。","货代报价须填写货代、路线和费用口径。":"货代报价须填写货代、路线和费用口径。","货代报价须填写有效日期（年-月-日）。":"货代报价须填写有效日期（年-月-日）。","运费和国内费用须为非负数，无费用填 0。":"运费和国内费用须为非负数，无费用填 0。","核算记录须包含有效模式、产品和核算数据。":"核算记录须包含有效模式、产品和核算数据。","核算记录中的数量、费用、汇率或退税率无效。":"核算记录中的数量、费用、汇率或退税率无效。","ETD 只能输入英文字符、数字和标点。":"ETD 只能输入英文字符、数字和标点。","核算记录缺少有效计算结果。":"核算记录缺少有效计算结果。","核算记录的最高运费计算结果无效。":"核算记录的最高运费计算结果无效。","核算记录缺少有效保存时间。":"核算记录缺少有效保存时间。","未知记录类型。":"未知记录类型。","备份必须是有效数据对象。":"备份必须是有效数据对象。","备份须包含工厂报价、货代报价和核算记录数组。":"备份须包含工厂报价、货代报价和核算记录数组。","工厂报价":"工厂报价","货代报价":"货代报价","核算记录":"核算记录","产品目录须为数组。":"产品目录须为数组。","非危险品":"非危险品","(?:USD|RMB|CNY|人民币|美金|美元|元|[$￥¥])":"(?:USD|RMB|CNY|人民币|美金|美元|元|[$￥¥])","不打托":"不打托","CAS号":"CAS号","交货期":"交货期","含量":"含量","纯度":"纯度","含量/纯度":"含量/纯度","质量指标":"质量指标","危险性":"危险性","危险品":"危险品","危险货物":"危险货物","危险品类别":"危险品类别","危险品等级":"危险品等级","危险货物类别":"危险货物类别","未记录":"未记录","人民币采购":"人民币采购","美元采购":"美元采购","自有工厂倒推":"自有工厂倒推","产品目录":"产品目录","报价国家":"报价国家","对客单价":"对客单价","国际运费":"国际运费","国内费用":"国内费用","增值税率":"增值税率","退税率":"退税率","核算方式":"核算方式","未知操作":"未知操作","仅支持更新工厂报价":"仅支持更新工厂报价","仅支持更新工厂报价或产品":"仅支持更新工厂报价或产品","报价工作台服务端仍是旧版本，请完全退出并重启 Harness，或重新启用报价工作台插件后再试。":"报价工作台服务端仍是旧版本，请完全退出并重启 Harness，或重新启用报价工作台插件后再试。","输入国家中文 / English / 代码":"输入国家中文 / English / 代码","没有匹配的国家 / 地区":"没有匹配的国家 / 地区","输入产品名称搜索":"输入产品名称搜索","未找到相似产品，可继续手动输入。":"未找到相似产品，可继续手动输入。","↑↓ 选择 · Enter 确认":"↑↓ 选择 · Enter 确认","产品推荐":"产品推荐","相似":"相似","ETD 只能输入英文字符、数字和标点":"ETD 只能输入英文字符、数字和标点","数量只能填写阿拉伯数字":"数量只能填写阿拉伯数字","不能包含中文":"不能包含中文","正在编辑已保存的报价。":"正在编辑已保存的报价。","已复制到新报价草稿，请确认后保存。":"已复制到新报价草稿，请确认后保存。","已保存。":"已保存。","同时导出内部成本页":"同时导出内部成本页","包含成本数据":"包含成本数据","请选择与当前采购币种及 CAS 相符的报价。":"请选择与当前采购币种及 CAS 相符的报价。","已自动填入工厂报价的采购单价、退税率、产品和 CAS，报价含明确数量时同步填入数量；请补充交货地点、运费和汇率。":"已自动填入工厂报价的采购单价、退税率、产品和 CAS，报价含明确数量时同步填入数量；请补充交货地点、运费和汇率。","删除这条记录？":"删除这条记录？","汇率":"汇率","采购单价":"采购单价","收汇汇率":"收汇汇率","最低国际运费":"最低国际运费","最高国际运费":"最高国际运费","FCA 成本 USD/kg":"FCA 成本 USD/kg","C&F 成本 USD/kg":"C&F 成本 USD/kg","C&F（CFR）成本、预计利润和利润率按最低 / 最高国际运费计算区间；最高与最低相同时为单值，不含资金利息、货运险及信保费。":"C&F（CFR）成本、预计利润和利润率按最低 / 最高国际运费计算区间；最高与最低相同时为单值，不含资金利息、货运险及信保费。","填写高于最低运费的「最高国际运费」后，C&F 成本、利润和利润率会显示区间。":"填写高于最低运费的「最高国际运费」后，C&F 成本、利润和利润率会显示区间。","盈亏平衡对客单价 USD/kg":"盈亏平衡对客单价 USD/kg","最高国际运费低于最低国际运费，请调整后才能保存。":"最高国际运费低于最低国际运费，请调整后才能保存。","人民币含税倒推价 RMB/kg":"人民币含税倒推价 RMB/kg","美元不含税倒推价 USD/kg":"美元不含税倒推价 USD/kg","按最低 / 最高国际运费计算倒推价区间；人民币含税倒推价按增值税率和退税率换算。":"按最低 / 最高国际运费计算倒推价区间；人民币含税倒推价按增值税率和退税率换算。","预计利润 USD":"预计利润 USD","采购成本利润率":"采购成本利润率","人民币利润 RMB":"人民币利润 RMB","运输保险 USD":"运输保险 USD","信用保险 USD":"信用保险 USD","资金占用 USD":"资金占用 USD","退税率不能达到 100% + 增值税率，请调整。":"退税率不能达到 100% + 增值税率，请调整。","最高国际运费不能低于最低国际运费，请调整。":"最高国际运费不能低于最低国际运费，请调整。","请补全数量、售价、汇率、费用和费率。无费用请填 0。":"请补全数量、售价、汇率、费用和费率。无费用请填 0。","请补全数量、单价、汇率、费用和费率。无费用请填 0，最高运费不得低于最低运费。":"请补全数量、单价、汇率、费用和费率。无费用请填 0，最高运费不得低于最低运费。","已复制到新核算草稿，请确认后保存。":"已复制到新核算草稿，请确认后保存。","数量只能填写阿拉伯数字。":"数量只能填写阿拉伯数字。","已覆盖原报价。":"已覆盖原报价。","已另存为新的报价。":"已另存为新的报价。","已覆盖原核算记录，核算页面已清空。":"已覆盖原核算记录，核算页面已清空。","已另存为新的核算记录，核算页面已清空。":"已另存为新的核算记录，核算页面已清空。","已保存，核算页面已清空。":"已保存，核算页面已清空。","报价工作台备份.json":"报价工作台备份.json","包含内部成本页":"包含内部成本页","仅含客户 Quotation 页":"仅含客户 Quotation 页","请先在 01 选择对应工厂报价":"请先在 01 选择对应工厂报价","请先勾选要合并的核算记录":"请先勾选要合并的核算记录","备份超过 10 MB":"备份超过 10 MB","导入将替换全部记录，请确认已备份。":"导入将替换全部记录，请确认已备份。","完整报价明细":"完整报价明细","暂无明细":"暂无明细","带入核算":"带入核算","编辑":"编辑","复制":"复制","删除":"删除","询价":"询价","口径未填写":"口径未填写","未匹配工厂":"未匹配工厂","地点未记录":"地点未记录","选择这条核算记录":"选择这条核算记录","选择":"选择","粘贴工厂报价":"粘贴工厂报价","已保存":"已保存","1390美金青岛，22t/20GP不打托，11月中交货":"1390美金青岛，22t/20GP不打托，11月中交货","原始报价 / Excel 表格":"原始报价 / Excel 表格","正在解析…":"正在解析…","AI 提取字段":"AI 提取字段","模型没有从这段内容中识别到报价，请补充数量、价格、单位等信息或换一个模型。":"模型没有从这段内容中识别到报价，请补充数量、价格、单位等信息或换一个模型。","规则提取":"规则提取","没有识别到报价，请先粘贴报价文本。":"没有识别到报价，请先粘贴报价文本。","正在编辑已保存的报价：可覆盖原报价，或另存为新报价；覆盖会保留原创建时间。":"正在编辑已保存的报价：可覆盖原报价，或另存为新报价；覆盖会保留原创建时间。","覆盖原报价":"覆盖原报价","确认并保存报价":"确认并保存报价","另存为新报价":"另存为新报价","取消编辑":"取消编辑","未选择解析模型，请到 设置 → 报价工作台 配置；字段也可手动填写。":"未选择解析模型，请到 设置 → 报价工作台 配置；字段也可手动填写。","已保存的工厂报价":"已保存的工厂报价","暂无工厂报价":"暂无工厂报价","该 CAS 号已在目录中。":"该 CAS 号已在目录中。","编辑产品":"编辑产品","新增产品":"新增产品","保存修改":"保存修改","保存产品":"保存产品","来自报价的产品：CAS 已锁定；货物危险性、税率留空时继续按报价/核算自动取值，填写后以目录设置为准。":"来自报价的产品：CAS 已锁定；货物危险性、税率留空时继续按报价/核算自动取值，填写后以目录设置为准。","货物危险性留空时按该 CAS 最近一次工厂报价自动取值；税率留空时按核算或工厂报价自动取值；填写后以目录设置为准。":"货物危险性留空时按该 CAS 最近一次工厂报价自动取值；税率留空时按核算或工厂报价自动取值；填写后以目录设置为准。","目录同时包含手工产品及已保存报价中的产品；编辑来自报价的产品会保存一条目录覆盖，删除覆盖后恢复报价名称和货物危险性。":"目录同时包含手工产品及已保存报价中的产品；编辑来自报价的产品会保存一条目录覆盖，删除覆盖后恢复报价名称和货物危险性。","搜索产品名称或 CAS":"搜索产品名称或 CAS","来自已保存报价":"来自已保存报价","带入工厂":"带入工厂","没有符合条件的产品。":"没有符合条件的产品。","新增货代报价":"新增货代报价","拼箱询价单位默认按重量；如为抛货，请选择「是」并填写体积（CBM）。":"拼箱询价单位默认按重量；如为抛货，请选择「是」并填写体积（CBM）。","整柜只需选择柜型；拼箱 / 空运需填写询价数量和单位。":"整柜只需选择柜型；拼箱 / 空运需填写询价数量和单位。","保存货代报价":"保存货代报价","货代报价比较":"货代报价比较","已选报价存在口径不一致、过期或数据不完整，无法计算均值。":"已选报价存在口径不一致、过期或数据不完整，无法计算均值。","国际运费 / 国内费用均值":"国际运费 / 国内费用均值","暂无货代报价":"暂无货代报价","勾选同一客户的核算记录后，可合并输出一张报价单。":"勾选同一客户的核算记录后，可合并输出一张报价单。","只能合并同一客户的记录；请检查所选记录的客户名称。":"只能合并同一客户的记录；请检查所选记录的客户名称。","CAS 关键词":"CAS 关键词","如 67-68 或 6768":"如 67-68 或 6768","按 CAS 筛选核算记录":"按 CAS 筛选核算记录","客户名称关键词":"客户名称关键词","如 STIM":"如 STIM","按客户名称筛选核算记录":"按客户名称筛选核算记录","清除筛选":"清除筛选","全选当前结果":"全选当前结果","清除选择":"清除选择","合并输出报价单":"合并输出报价单","没有符合 CAS 或客户名称关键词的核算记录。":"没有符合 CAS 或客户名称关键词的核算记录。","暂无核算记录":"暂无核算记录","资金占用月数默认同账期，可手动修改；手动修改后不再随账期变化。":"资金占用月数默认同账期，可手动修改；手动修改后不再随账期变化。","01 / 产品与报价":"01 / 产品与报价","02 / 成本与参数":"02 / 成本与参数","最低国际运费 USD/票":"最低国际运费 USD/票","国内费用填写我方承担的完整总额，避免重复计入货代报价。":"国内费用填写我方承担的完整总额，避免重复计入货代报价。","自有工厂倒推只需收汇汇率；人民币含税倒推价按增值税率和退税率换算。":"自有工厂倒推只需收汇汇率；人民币含税倒推价按增值税率和退税率换算。","01 / 选取工厂报价":"01 / 选取工厂报价","增值税率和退税率按 CAS 绑定：输入有历史记录的 CAS 自动代入，保存核算后会记住该产品的税率。":"增值税率和退税率按 CAS 绑定：输入有历史记录的 CAS 自动代入，保存核算后会记住该产品的税率。","选取工厂报价":"选取工厂报价","请选择已保存的工厂报价":"请选择已保存的工厂报价","暂无该 CAS 的可用工厂报价":"暂无该 CAS 的可用工厂报价","暂无可用的工厂报价":"暂无可用的工厂报价","未填写工厂":"未填写工厂","带入成本":"带入成本","02 / 工厂与运输成本":"02 / 工厂与运输成本","含税采购单价 RMB/kg":"含税采购单价 RMB/kg","采购单价 USD/kg":"采购单价 USD/kg","03 / 对客户报价":"03 / 对客户报价","04 / 其他费率、资金占用情况":"04 / 其他费率、资金占用情况","补全核算后可输出。":"补全核算后可输出。","请先填写产品名称。":"请先填写产品名称。","请先在 01 选择对应工厂报价。":"请先在 01 选择对应工厂报价。","生成英文 Quotation 和内部 Costing 工作表，可直接编辑。":"生成英文 Quotation 和内部 Costing 工作表，可直接编辑。","报价核算":"报价核算","载入 Excel 样例":"载入 Excel 样例","当前国家、账期和付款方式没有匹配的信保费率，请核对条件或手动填写费率；不可按 0 处理。":"当前国家、账期和付款方式没有匹配的信保费率，请核对条件或手动填写费率；不可按 0 处理。","选择国家、账期和付款方式自动带出信保费率，或直接手填；账期按每月 30 天计算。":"选择国家、账期和付款方式自动带出信保费率，或直接手填；账期按每月 30 天计算。","本次核算":"本次核算","输出报价单":"输出报价单","生成可编辑的英文 Excel 报价单":"生成可编辑的英文 Excel 报价单","正在编辑历史记录：可另存为新记录，或覆盖原记录。":"正在编辑历史记录：可另存为新记录，或覆盖原记录。","另存为新记录":"另存为新记录","保存本次核算":"保存本次核算","覆盖原记录":"覆盖原记录","沿用原工作台的保险、资金利息及倒推公式；导出的工作簿包含英文 Quotation 和内部 Costing 两个可编辑工作表。":"沿用原工作台的保险、资金利息及倒推公式；导出的工作簿包含英文 Quotation 和内部 Costing 两个可编辑工作表。","报价工作台":"报价工作台","正在加载报价记录…":"正在加载报价记录…","采购 · 物流 · 利润":"采购 · 物流 · 利润","界面缩放":"界面缩放","缩小（Ctrl + -）":"缩小（Ctrl + -）","缩小":"缩小","恢复默认大小（Ctrl + 0）":"恢复默认大小（Ctrl + 0）","放大（Ctrl + =）":"放大（Ctrl + =）","放大":"放大","刷新记录":"刷新记录","同步飞书（有待同步）":"同步飞书（有待同步）","同步飞书":"同步飞书","导出备份":"导出备份","导入备份":"导入备份","检测到飞书端与本地同时修改了以下记录，请选择保留哪一端：":"检测到飞书端与本地同时修改了以下记录，请选择保留哪一端：","保留本地":"保留本地","采用远端":"采用远端","记录保存在 Harness 中；未保存的草稿在离开工作台后保留 5 分钟，超过 5 分钟未操作则清空。支持导入原工作台的 JSON 备份。":"记录保存在 Harness 中；未保存的草稿在离开工作台后保留 5 分钟，超过 5 分钟未操作则清空。支持导入原工作台的 JSON 备份。","配置已保存，但同步未就绪":"配置已保存，但同步未就绪","飞书同步设置已保存，并已检查/创建数据表。":"飞书同步设置已保存，并已检查/创建数据表。","已完成一次全量拉取与推送。":"已完成一次全量拉取与推送。","飞书账号授权成功。":"飞书账号授权成功。","已退出飞书账号授权。":"已退出飞书账号授权。","已保存，下一次解析立即生效。":"已保存，下一次解析立即生效。","AI 报价解析":"AI 报价解析","粘贴工厂报价时，用来提取产品、价格、单位、条款等字段的大模型。列表来自当前 Harness 已接入的提供方与模型。":"粘贴工厂报价时，用来提取产品、价格、单位、条款等字段的大模型。列表来自当前 Harness 已接入的提供方与模型。","解析模型":"解析模型","跟随 Harness 默认模型":"跟随 Harness 默认模型","保存":"保存","刷新模型列表":"刷新模型列表","飞书同步":"飞书同步","把工厂报价、货代报价、核算记录、产品目录同步到飞书多维表格（Bitable）。业务数据经飞书开放平台服务端接口读写，需先在飞书开放平台创建自建应用并开通多维表格权限。":"把工厂报价、货代报价、核算记录、产品目录同步到飞书多维表格（Bitable）。业务数据经飞书开放平台服务端接口读写，需先在飞书开放平台创建自建应用并开通多维表格权限。","飞书应用 App ID":"飞书应用 App ID","已保存，留空则不修改":"已保存，留空则不修改","飞书应用 App Secret":"飞书应用 App Secret","多维表格 app_token":"多维表格 app_token","多维表格 Base 的 app_token":"多维表格 Base 的 app_token","启用飞书同步":"启用飞书同步","个人账号授权":"个人账号授权","同步使用你本人的飞书账号身份。先保存上面的应用配置，再点击授权，登录飞书并同意后即可。此后你的修改会以你的名义写入多维表格的「最后修改人」列。":"同步使用你本人的飞书账号身份。先保存上面的应用配置，再点击授权，登录飞书并同意后即可。此后你的修改会以你的名义写入多维表格的「最后修改人」列。","当前已授权":"当前已授权","重新授权":"重新授权","退出授权":"退出授权","授权飞书账号":"授权飞书账号","或粘贴授权码":"或粘贴授权码","从回调地址粘贴 code 或整条 URL":"从回调地址粘贴 code 或整条 URL","提交授权码":"提交授权码","飞书同步已就绪。":"飞书同步已就绪。","飞书同步尚未配置完整（需 App ID、App Secret、app_token 与四张表）。":"飞书同步尚未配置完整（需 App ID、App Secret、app_token 与四张表）。","保存飞书设置":"保存飞书设置","立即同步":"立即同步","正在读取可用模型…":"正在读取可用模型…","当前生效":"当前生效","当前没有可用模型。请先在 Harness 设置里接入模型，或选择「跟随 Harness 默认模型」。":"当前没有可用模型。请先在 Harness 设置里接入模型，或选择「跟随 Harness 默认模型」。","没有发现已公布模型的提供方；仍可跟随 Harness 默认模型，或先到 设置 → 模型 接入模型。":"没有发现已公布模型的提供方；仍可跟随 Harness 默认模型，或先到 设置 → 模型 接入模型。"};
+ const en = {"海运整柜":"海运整柜","海运拼箱":"海运拼箱","空运":"空运","铁路":"铁路","公路":"公路","快递":"快递","其他":"其他","CAS 号":"CAS 号","运输方式":"运输方式","产品 / 规格":"产品 / 规格","客户":"客户","报价国家 / 地区":"报价国家 / 地区","账期（月）":"账期（月）","信保付款方式":"信保付款方式","D/A 或 O/A":"D/A 或 O/A","数量 kg":"数量 kg","对客单价 USD/kg":"对客单价 USD/kg","待确认":"待确认","交货地点 / 港口":"交货地点 / 港口","ETD（预计开船日）":"ETD (estimated departure)","工厂采购单价":"工厂采购单价","买汇 / 成本汇率 RMB/USD":"买汇 / 成本汇率 RMB/USD","收汇汇率 RMB/USD":"收汇汇率 RMB/USD","国际运费 USD/票":"国际运费 USD/票","国内费用总额 RMB/票":"国内费用总额 RMB/票","增值税率 %":"增值税率 %","退税率 %":"退税率 %","运输保险费率 %":"运输保险费率 %","信用保险费率 %":"信用保险费率 %","年资金利率 %":"年资金利率 %","资金占用月数":"资金占用月数","报价日期":"报价日期","产品":"产品","含量 / 纯度":"Content / purity","其他关键质量指标":"Other key quality indicators","货物危险性":"货物危险性","工厂":"工厂","报价明细":"报价明细","数量":"数量","报价有效期":"报价有效期","报价单价":"报价单价","币种":"币种","退税率 %（不退税填 0）":"退税率 %（不退税填 0）","计价单位":"计价单位","吨":"吨","公斤":"公斤","交货地点":"交货地点","装柜量 / 柜型":"装柜量 / 柜型","包装方式":"包装方式","交货期（含年份）":"交货期（含年份）","进仓费承担方":"进仓费承担方","我方":"我方","港杂费承担方":"港杂费承担方","产品名称":"产品名称","票":"票","否":"否","是":"是","货代名称":"货代名称","起运地":"起运地","目的地":"目的地","柜型":"柜型","询价数量":"询价数量","询价单位":"询价单位","是否抛货":"是否抛货","体积（CBM）":"体积（CBM）","有效期":"有效期","国内费用 RMB/票":"国内费用 RMB/票","最高国际运费 USD/票":"最高国际运费 USD/票","东帝汶":"东帝汶","荷属安地列斯群岛":"荷属安地列斯群岛","香港":"香港","澳门":"澳门","台湾":"台湾","巴勒斯坦":"巴勒斯坦","中国（买方/开证行参考）":"中国（买方/开证行参考）","塞卜泰（休达）":"塞卜泰（休达）","马约特岛":"马约特岛","加那利群岛":"加那利群岛","梅利利亚":"梅利利亚","博内尔":"博内尔","库腊索岛":"库腊索岛","萨巴":"萨巴","圣马丁岛":"圣马丁岛","盖比群岛":"盖比群岛","社会群岛":"社会群岛","土阿莫土群岛":"土阿莫土群岛","马恩岛":"马恩岛","诺曼底群岛":"诺曼底群岛","0–30 天":"0–30 天","31–60 天":"31–60 天","61–90 天":"61–90 天","91–180 天":"91–180 天","181 天–1 年":"181 天–1 年","1–2 年":"1–2 年","十":"十","天":"天","周":"周","个月":"个月","年":"年","记录必须是有效对象。":"记录必须是有效对象。","请填写产品名称和 CAS 号，格式如 67-68-5。":"请填写产品名称和 CAS 号，格式如 67-68-5。","货物危险性须为文本。":"货物危险性须为文本。","请填写 0–100 的增值税率。":"请填写 0–100 的增值税率。","请填写 0–100 的退税率。":"请填写 0–100 的退税率。","工厂报价须填写产品名称和有效正数价格。":"工厂报价须填写产品名称和有效正数价格。","工厂报价须确认币种和计价单位。":"工厂报价须确认币种和计价单位。","请填写 0–100 的退税率，不退税填 0。":"请填写 0–100 的退税率，不退税填 0。","货代报价须填写货代名称。":"货代报价须填写货代名称。","货代报价须分别填写起运地和目的地。":"货代报价须分别填写起运地和目的地。","货代报价须确认有效运输方式。":"货代报价须确认有效运输方式。","整柜报价须选择有效柜型。":"整柜报价须选择有效柜型。","拼箱或空运报价须填写询价数量。":"拼箱或空运报价须填写询价数量。","拼箱或空运报价须选择询价单位。":"拼箱或空运报价须选择询价单位。","拼箱报价须选择是否抛货。":"拼箱报价须选择是否抛货。","抛货报价须填写体积（CBM）。":"抛货报价须填写体积（CBM）。","货代报价须填写货代、路线和费用口径。":"货代报价须填写货代、路线和费用口径。","货代报价须填写有效日期（年-月-日）。":"货代报价须填写有效日期（年-月-日）。","运费和国内费用须为非负数，无费用填 0。":"运费和国内费用须为非负数，无费用填 0。","核算记录须包含有效模式、产品和核算数据。":"核算记录须包含有效模式、产品和核算数据。","核算记录中的数量、费用、汇率或退税率无效。":"核算记录中的数量、费用、汇率或退税率无效。","ETD 只能输入英文字符、数字和标点。":"ETD accepts English letters, digits, spaces and punctuation only.","核算记录缺少有效计算结果。":"核算记录缺少有效计算结果。","核算记录的最高运费计算结果无效。":"核算记录的最高运费计算结果无效。","核算记录缺少有效保存时间。":"核算记录缺少有效保存时间。","未知记录类型。":"未知记录类型。","备份必须是有效数据对象。":"备份必须是有效数据对象。","备份须包含工厂报价、货代报价和核算记录数组。":"备份须包含工厂报价、货代报价和核算记录数组。","工厂报价":"Supplier quotes","货代报价":"Freight quotes","核算记录":"Calculation history","产品目录须为数组。":"产品目录须为数组。","非危险品":"非危险品","(?:USD|RMB|CNY|人民币|美金|美元|元|[$￥¥])":"(?:USD|RMB|CNY|人民币|美金|美元|元|[$￥¥])","不打托":"不打托","CAS号":"CAS号","交货期":"交货期","含量":"含量","纯度":"纯度","含量/纯度":"含量/纯度","质量指标":"质量指标","危险性":"危险性","危险品":"危险品","危险货物":"危险货物","危险品类别":"危险品类别","危险品等级":"危险品等级","危险货物类别":"危险货物类别","未记录":"未记录","人民币采购":"RMB procurement","美元采购":"USD procurement","自有工厂倒推":"Factory price reverse calculation","产品目录":"产品目录","报价国家":"报价国家","对客单价":"对客单价","国际运费":"国际运费","国内费用":"国内费用","增值税率":"增值税率","退税率":"退税率","核算方式":"核算方式","未知操作":"未知操作","仅支持更新工厂报价":"仅支持更新工厂报价","仅支持更新工厂报价或产品":"仅支持更新工厂报价或产品","报价工作台服务端仍是旧版本，请完全退出并重启 Harness，或重新启用报价工作台插件后再试。":"The quote workbench server is still running an older version. Fully quit and restart Harness, or re-enable the quote workbench plugin, then try again.","输入国家中文 / English / 代码":"输入国家中文 / English / 代码","没有匹配的国家 / 地区":"没有匹配的国家 / 地区","输入产品名称搜索":"Search by product name","未找到相似产品，可继续手动输入。":"No similar products. You can keep typing a custom name.","↑↓ 选择 · Enter 确认":"↑↓ Choose · Enter to confirm","产品推荐":"Product suggestions","相似":"Similar","ETD 只能输入英文字符、数字和标点":"ETD 只能输入英文字符、数字和标点","数量只能填写阿拉伯数字":"Quantity must be Arabic digits only","不能包含中文":"Chinese characters are not allowed","正在编辑已保存的报价。":"正在编辑已保存的报价。","已复制到新报价草稿，请确认后保存。":"Copied to a new quote draft. Review it before saving.","已保存。":"已保存。","同时导出内部成本页":"Also export internal costing sheets","包含成本数据":"Include costing data","请选择与当前采购币种及 CAS 相符的报价。":"请选择与当前采购币种及 CAS 相符的报价。","已自动填入工厂报价的采购单价、退税率、产品和 CAS，报价含明确数量时同步填入数量；请补充交货地点、运费和汇率。":"Filled the quote price, rebate, product and CAS, plus quantity when the quote states it. Add the delivery place, freight and FX.","删除这条记录？":"删除这条记录？","汇率":"汇率","采购单价":"采购单价","收汇汇率":"收汇汇率","最低国际运费":"最低国际运费","最高国际运费":"最高国际运费","FCA 成本 USD/kg":"FCA 成本 USD/kg","C&F 成本 USD/kg":"C&F 成本 USD/kg","C&F（CFR）成本、预计利润和利润率按最低 / 最高国际运费计算区间；最高与最低相同时为单值，不含资金利息、货运险及信保费。":"C&F（CFR）成本、预计利润和利润率按最低 / 最高国际运费计算区间；最高与最低相同时为单值，不含资金利息、货运险及信保费。","填写高于最低运费的「最高国际运费」后，C&F 成本、利润和利润率会显示区间。":"填写高于最低运费的「最高国际运费」后，C&F 成本、利润和利润率会显示区间。","盈亏平衡对客单价 USD/kg":"盈亏平衡对客单价 USD/kg","最高国际运费低于最低国际运费，请调整后才能保存。":"最高国际运费低于最低国际运费，请调整后才能保存。","人民币含税倒推价 RMB/kg":"人民币含税倒推价 RMB/kg","美元不含税倒推价 USD/kg":"美元不含税倒推价 USD/kg","按最低 / 最高国际运费计算倒推价区间；人民币含税倒推价按增值税率和退税率换算。":"按最低 / 最高国际运费计算倒推价区间；人民币含税倒推价按增值税率和退税率换算。","预计利润 USD":"预计利润 USD","采购成本利润率":"采购成本利润率","人民币利润 RMB":"人民币利润 RMB","运输保险 USD":"运输保险 USD","信用保险 USD":"信用保险 USD","资金占用 USD":"资金占用 USD","退税率不能达到 100% + 增值税率，请调整。":"退税率不能达到 100% + 增值税率，请调整。","最高国际运费不能低于最低国际运费，请调整。":"最高国际运费不能低于最低国际运费，请调整。","请补全数量、售价、汇率、费用和费率。无费用请填 0。":"请补全数量、售价、汇率、费用和费率。无费用请填 0。","请补全数量、单价、汇率、费用和费率。无费用请填 0，最高运费不得低于最低运费。":"请补全数量、单价、汇率、费用和费率。无费用请填 0，最高运费不得低于最低运费。","已复制到新核算草稿，请确认后保存。":"Copied to a new calculation draft. Review it before saving.","数量只能填写阿拉伯数字。":"数量只能填写阿拉伯数字。","已覆盖原报价。":"已覆盖原报价。","已另存为新的报价。":"已另存为新的报价。","已覆盖原核算记录，核算页面已清空。":"已覆盖原核算记录，核算页面已清空。","已另存为新的核算记录，核算页面已清空。":"已另存为新的核算记录，核算页面已清空。","已保存，核算页面已清空。":"已保存，核算页面已清空。","报价工作台备份.json":"报价工作台备份.json","包含内部成本页":"包含内部成本页","仅含客户 Quotation 页":"仅含客户 Quotation 页","请先在 01 选择对应工厂报价":"请先在 01 选择对应工厂报价","请先勾选要合并的核算记录":"请先勾选要合并的核算记录","备份超过 10 MB":"备份超过 10 MB","导入将替换全部记录，请确认已备份。":"导入将替换全部记录，请确认已备份。","完整报价明细":"完整报价明细","暂无明细":"暂无明细","带入核算":"Use in calculation","编辑":"Edit","复制":"Copy","删除":"Delete","询价":"询价","口径未填写":"口径未填写","未匹配工厂":"No matching factory","地点未记录":"地点未记录","选择这条核算记录":"Select this calculation","选择":"Select","粘贴工厂报价":"粘贴工厂报价","已保存":"Saved","1390美金青岛，22t/20GP不打托，11月中交货":"1390美金青岛，22t/20GP不打托，11月中交货","原始报价 / Excel 表格":"原始报价 / Excel 表格","正在解析…":"Parsing…","AI 提取字段":"Extract with AI","模型没有从这段内容中识别到报价，请补充数量、价格、单位等信息或换一个模型。":"模型没有从这段内容中识别到报价，请补充数量、价格、单位等信息或换一个模型。","规则提取":"规则提取","没有识别到报价，请先粘贴报价文本。":"没有识别到报价，请先粘贴报价文本。","正在编辑已保存的报价：可覆盖原报价，或另存为新报价；覆盖会保留原创建时间。":"正在编辑已保存的报价：可覆盖原报价，或另存为新报价；覆盖会保留原创建时间。","覆盖原报价":"覆盖原报价","确认并保存报价":"确认并保存报价","另存为新报价":"另存为新报价","取消编辑":"取消编辑","未选择解析模型，请到 设置 → 报价工作台 配置；字段也可手动填写。":"未选择解析模型，请到 设置 → 报价工作台 配置；字段也可手动填写。","已保存的工厂报价":"已保存的工厂报价","暂无工厂报价":"暂无工厂报价","该 CAS 号已在目录中。":"该 CAS 号已在目录中。","编辑产品":"编辑产品","新增产品":"新增产品","保存修改":"保存修改","保存产品":"保存产品","来自报价的产品：CAS 已锁定；货物危险性、税率留空时继续按报价/核算自动取值，填写后以目录设置为准。":"来自报价的产品：CAS 已锁定；货物危险性、税率留空时继续按报价/核算自动取值，填写后以目录设置为准。","货物危险性留空时按该 CAS 最近一次工厂报价自动取值；税率留空时按核算或工厂报价自动取值；填写后以目录设置为准。":"货物危险性留空时按该 CAS 最近一次工厂报价自动取值；税率留空时按核算或工厂报价自动取值；填写后以目录设置为准。","目录同时包含手工产品及已保存报价中的产品；编辑来自报价的产品会保存一条目录覆盖，删除覆盖后恢复报价名称和货物危险性。":"目录同时包含手工产品及已保存报价中的产品；编辑来自报价的产品会保存一条目录覆盖，删除覆盖后恢复报价名称和货物危险性。","搜索产品名称或 CAS":"搜索产品名称或 CAS","来自已保存报价":"来自已保存报价","带入工厂":"带入工厂","没有符合条件的产品。":"没有符合条件的产品。","新增货代报价":"新增货代报价","拼箱询价单位默认按重量；如为抛货，请选择「是」并填写体积（CBM）。":"拼箱询价单位默认按重量；如为抛货，请选择「是」并填写体积（CBM）。","整柜只需选择柜型；拼箱 / 空运需填写询价数量和单位。":"整柜只需选择柜型；拼箱 / 空运需填写询价数量和单位。","保存货代报价":"保存货代报价","货代报价比较":"货代报价比较","已选报价存在口径不一致、过期或数据不完整，无法计算均值。":"已选报价存在口径不一致、过期或数据不完整，无法计算均值。","国际运费 / 国内费用均值":"国际运费 / 国内费用均值","暂无货代报价":"暂无货代报价","勾选同一客户的核算记录后，可合并输出一张报价单。":"Select calculations for the same customer to merge them into one quotation.","只能合并同一客户的记录；请检查所选记录的客户名称。":"Only calculations for the same customer can be merged. Check the selected customer names.","CAS 关键词":"CAS keyword","如 67-68 或 6768":"e.g. 67-68 or 6768","按 CAS 筛选核算记录":"Filter history by CAS","客户名称关键词":"Customer keyword","如 STIM":"e.g. STIM","按客户名称筛选核算记录":"Filter history by customer","清除筛选":"Clear filters","全选当前结果":"Select current results","清除选择":"Clear selection","合并输出报价单":"Merge quotation","没有符合 CAS 或客户名称关键词的核算记录。":"没有符合 CAS 或客户名称关键词的核算记录。","暂无核算记录":"暂无核算记录","资金占用月数默认同账期，可手动修改；手动修改后不再随账期变化。":"资金占用月数默认同账期，可手动修改；手动修改后不再随账期变化。","01 / 产品与报价":"01 / 产品与报价","02 / 成本与参数":"02 / 成本与参数","最低国际运费 USD/票":"最低国际运费 USD/票","国内费用填写我方承担的完整总额，避免重复计入货代报价。":"国内费用填写我方承担的完整总额，避免重复计入货代报价。","自有工厂倒推只需收汇汇率；人民币含税倒推价按增值税率和退税率换算。":"自有工厂倒推只需收汇汇率；人民币含税倒推价按增值税率和退税率换算。","01 / 选取工厂报价":"01 / 选取工厂报价","增值税率和退税率按 CAS 绑定：输入有历史记录的 CAS 自动代入，保存核算后会记住该产品的税率。":"增值税率和退税率按 CAS 绑定：输入有历史记录的 CAS 自动代入，保存核算后会记住该产品的税率。","选取工厂报价":"选取工厂报价","请选择已保存的工厂报价":"请选择已保存的工厂报价","暂无该 CAS 的可用工厂报价":"暂无该 CAS 的可用工厂报价","暂无可用的工厂报价":"暂无可用的工厂报价","未填写工厂":"未填写工厂","带入成本":"带入成本","02 / 工厂与运输成本":"02 / 工厂与运输成本","含税采购单价 RMB/kg":"含税采购单价 RMB/kg","采购单价 USD/kg":"采购单价 USD/kg","03 / 对客户报价":"03 / 对客户报价","04 / 其他费率、资金占用情况":"04 / 其他费率、资金占用情况","补全核算后可输出。":"补全核算后可输出。","请先填写产品名称。":"Enter a product name first.","请先在 01 选择对应工厂报价。":"Select the matching factory quote in step 01 first.","生成英文 Quotation 和内部 Costing 工作表，可直接编辑。":"Creates editable English Quotation and internal Costing sheets.","报价核算":"Quote calculation","载入 Excel 样例":"载入 Excel 样例","当前国家、账期和付款方式没有匹配的信保费率，请核对条件或手动填写费率；不可按 0 处理。":"当前国家、账期和付款方式没有匹配的信保费率，请核对条件或手动填写费率；不可按 0 处理。","选择国家、账期和付款方式自动带出信保费率，或直接手填；账期按每月 30 天计算。":"选择国家、账期和付款方式自动带出信保费率，或直接手填；账期按每月 30 天计算。","本次核算":"本次核算","输出报价单":"Export quotation","生成可编辑的英文 Excel 报价单":"Create an editable English Excel quotation","正在编辑历史记录：可另存为新记录，或覆盖原记录。":"正在编辑历史记录：可另存为新记录，或覆盖原记录。","另存为新记录":"另存为新记录","保存本次核算":"保存本次核算","覆盖原记录":"覆盖原记录","沿用原工作台的保险、资金利息及倒推公式；导出的工作簿包含英文 Quotation 和内部 Costing 两个可编辑工作表。":"Same insurance, interest and reverse-calculation formulas as before; the workbook has editable English Quotation and internal Costing sheets.","报价工作台":"Quote workbench","正在加载报价记录…":"正在加载报价记录…","采购 · 物流 · 利润":"采购 · 物流 · 利润","界面缩放":"Interface zoom","缩小（Ctrl + -）":"Zoom out (Ctrl + -)","缩小":"Zoom out","恢复默认大小（Ctrl + 0）":"Reset size (Ctrl + 0)","放大（Ctrl + =）":"Zoom in (Ctrl + =)","放大":"Zoom in","刷新记录":"Refresh records","同步飞书（有待同步）":"同步飞书（有待同步）","同步飞书":"同步飞书","导出备份":"Export backup","导入备份":"Import backup","检测到飞书端与本地同时修改了以下记录，请选择保留哪一端：":"检测到飞书端与本地同时修改了以下记录，请选择保留哪一端：","保留本地":"保留本地","采用远端":"采用远端","记录保存在 Harness 中；未保存的草稿在离开工作台后保留 5 分钟，超过 5 分钟未操作则清空。支持导入原工作台的 JSON 备份。":"记录保存在 Harness 中；未保存的草稿在离开工作台后保留 5 分钟，超过 5 分钟未操作则清空。支持导入原工作台的 JSON 备份。","配置已保存，但同步未就绪":"配置已保存，但同步未就绪","飞书同步设置已保存，并已检查/创建数据表。":"飞书同步设置已保存，并已检查/创建数据表。","已完成一次全量拉取与推送。":"已完成一次全量拉取与推送。","飞书账号授权成功。":"飞书账号授权成功。","已退出飞书账号授权。":"已退出飞书账号授权。","已保存，下一次解析立即生效。":"Saved. The next parse uses it immediately.","AI 报价解析":"AI quote parsing","粘贴工厂报价时，用来提取产品、价格、单位、条款等字段的大模型。列表来自当前 Harness 已接入的提供方与模型。":"粘贴工厂报价时，用来提取产品、价格、单位、条款等字段的大模型。列表来自当前 Harness 已接入的提供方与模型。","解析模型":"Parsing model","跟随 Harness 默认模型":"Use the Harness default model","保存":"Save","刷新模型列表":"Refresh model list","飞书同步":"飞书同步","把工厂报价、货代报价、核算记录、产品目录同步到飞书多维表格（Bitable）。业务数据经飞书开放平台服务端接口读写，需先在飞书开放平台创建自建应用并开通多维表格权限。":"把工厂报价、货代报价、核算记录、产品目录同步到飞书多维表格（Bitable）。业务数据经飞书开放平台服务端接口读写，需先在飞书开放平台创建自建应用并开通多维表格权限。","飞书应用 App ID":"飞书应用 App ID","已保存，留空则不修改":"已保存，留空则不修改","飞书应用 App Secret":"飞书应用 App Secret","多维表格 app_token":"多维表格 app_token","多维表格 Base 的 app_token":"多维表格 Base 的 app_token","启用飞书同步":"启用飞书同步","个人账号授权":"个人账号授权","同步使用你本人的飞书账号身份。先保存上面的应用配置，再点击授权，登录飞书并同意后即可。此后你的修改会以你的名义写入多维表格的「最后修改人」列。":"同步使用你本人的飞书账号身份。先保存上面的应用配置，再点击授权，登录飞书并同意后即可。此后你的修改会以你的名义写入多维表格的「最后修改人」列。","当前已授权":"当前已授权","重新授权":"重新授权","退出授权":"退出授权","授权飞书账号":"授权飞书账号","或粘贴授权码":"或粘贴授权码","从回调地址粘贴 code 或整条 URL":"从回调地址粘贴 code 或整条 URL","提交授权码":"提交授权码","飞书同步已就绪。":"飞书同步已就绪。","飞书同步尚未配置完整（需 App ID、App Secret、app_token 与四张表）。":"飞书同步尚未配置完整（需 App ID、App Secret、app_token 与四张表）。","保存飞书设置":"保存飞书设置","立即同步":"立即同步","正在读取可用模型…":"Loading available models…","当前生效":"In effect","当前没有可用模型。请先在 Harness 设置里接入模型，或选择「跟随 Harness 默认模型」。":"当前没有可用模型。请先在 Harness 设置里接入模型，或选择「跟随 Harness 默认模型」。","没有发现已公布模型的提供方；仍可跟随 Harness 默认模型，或先到 设置 → 模型 接入模型。":"没有发现已公布模型的提供方；仍可跟随 Harness 默认模型，或先到 设置 → 模型 接入模型。","导出 Excel 报价单":"Export Excel quotation","沿用原工作台的保险、资金利息及倒推公式；导出的工作簿包含「报价单」和「成本核算」两个可编辑工作表。":"Same insurance, interest and reverse-calculation formulas as before; the workbook has editable “Quotation” and “Costing” sheets."};
  ctx.effect(() => ctx.locale.register('quote-workbench', 'zh', zh));
  ctx.effect(() => ctx.locale.register('quote-workbench', 'en', en));
  const translate = ctx.locale.bind('quote-workbench');
  const t = text => Object.hasOwn(zh, text) ? translate(text) : text;
- const { App, Icon, Settings } = createUI(React, ctx, t, ".qw-root{height:100%;min-height:0;display:flex;flex-direction:column;overflow:hidden;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:1.5}\n.qw-root *{box-sizing:border-box}\n.qw-content{flex:1;min-height:0;width:100%;max-width:1600px;margin:0 auto;padding:14px 18px 10px;display:flex;flex-direction:column;gap:8px}\n.qw-header{flex:0 0 auto;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}\n.qw-brand{display:flex;align-items:baseline;gap:10px;min-width:0}\n.qw-root h1{font-size:18px;font-weight:600;margin:0;white-space:nowrap}\n.qw-sub{font-size:11px;color:var(--dsw-alias-label-secondary);white-space:nowrap}\n.qw-root h2{font-size:13px;font-weight:600;margin:0}\n.qw-root h3{font-size:10.5px;font-weight:600;letter-spacing:.05em;margin:0 0 5px;color:var(--dsw-alias-label-secondary);text-transform:uppercase}\n.qw-root p{margin:0}\n.qw-toolbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}\n.qw-zoom{display:flex;align-items:center;border:1px solid var(--dsw-alias-border-l1);border-radius:7px;overflow:hidden;background:var(--dsw-alias-bg-layer-1)}\n.qw-root .qw-zoom button{border:0;border-radius:0;background:transparent;padding:5px 7px;font-size:11.5px;line-height:1.4;min-width:27px}\n.qw-root .qw-zoom button + button{border-left:1px solid var(--dsw-alias-border-l1)}\n.qw-root .qw-zoom .qw-zoom-value{min-width:44px;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary)}\n.qw-tabs{flex:0 0 auto;display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--dsw-alias-border-l1);padding-bottom:8px}\n.qw-root button{font:inherit;font-size:12px;border:1px solid var(--dsw-alias-border-l1);border-radius:7px;background:var(--dsw-alias-bg-layer-1);color:inherit;cursor:pointer;padding:5px 10px;margin:0;white-space:nowrap}\n.qw-root button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}\n.qw-root button:disabled{opacity:.45;cursor:default}\n.qw-root button[aria-current=page],.qw-root button[aria-pressed=true]{color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-interactive-bg-active);border-color:var(--dsw-alias-brand-primary)}\n.qw-root button.qw-primary{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground);border-color:transparent}\n.qw-root button.qw-primary:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}\n.qw-root :is(input,select,textarea){font:inherit;font-size:12.5px;min-width:0;width:100%;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);padding:5px 7px;border-radius:6px}\n.qw-root :is(input,select,textarea,button):focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}\n.qw-root textarea{resize:vertical;min-height:52px;line-height:1.45}\n.qw-root label{display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--dsw-alias-label-secondary);min-width:0}\n.qw-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px 10px}\n.qw-grid.qw-freight-form{grid-template-columns:repeat(2,minmax(0,1fr))}\n.qw-grid.qw-3col{grid-template-columns:repeat(3,minmax(0,1fr))}\n.qw-grid > .qw-span-2{grid-column:span 2}\n.qw-modes{display:flex;gap:5px;flex-wrap:wrap;margin:0 0 8px}\n.qw-alerts{flex:0 0 auto;display:flex;flex-direction:column;gap:2px}\n.qw-error{font-size:11.5px;color:var(--dsw-alias-state-error-primary);background:var(--dsw-alias-bg-layer-1);border:1px solid currentColor;border-radius:7px;padding:5px 9px}\n.qw-status{font-size:11.5px;color:var(--dsw-alias-state-success-primary);background:var(--dsw-alias-bg-layer-1);border:1px solid currentColor;border-radius:7px;padding:5px 9px}\n.qw-foot-note{flex:0 0 auto;font-size:10.5px;color:var(--dsw-alias-label-secondary);text-align:right}\n.qw-body{flex:1;min-height:0;display:grid;gap:12px}\n.qw-body.qw-factory{grid-template-columns:minmax(0,1.65fr) minmax(290px,1fr)}\n.qw-body.qw-calc{grid-template-columns:minmax(0,1.9fr) minmax(280px,.8fr)}\n.qw-body.qw-single{display:block;overflow:auto;padding-right:4px}\n.qw-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:start}\n.qw-card{display:flex;flex-direction:column;min-height:0;padding:12px 14px;border:1px solid var(--dsw-alias-border-l1);border-radius:11px;background:var(--dsw-alias-bg-layer-1)}\n.qw-form{overflow:auto;padding-right:12px}\n.qw-list,.qw-results{overflow:hidden}\n.qw-card-head{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;min-height:22px}\n.qw-section{margin-top:4px}\n.qw-section + .qw-section{margin-top:9px}\n.qw-form > textarea{margin-bottom:8px}\n.qw-form > .qw-toolbar{margin-bottom:8px}\n.qw-badge{flex:0 0 auto;font-size:10.5px;color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-l1);border-radius:999px;padding:1px 8px;white-space:nowrap}\n.qw-note{font-size:10.5px;line-height:1.45;color:var(--dsw-alias-label-secondary);margin:3px 0 0;overflow-wrap:anywhere}\n.qw-field-error{font-size:10.5px;line-height:1.35;color:var(--dsw-alias-state-error-primary);margin:0;overflow-wrap:anywhere}\n.qw-root input[aria-invalid=true]{border-color:var(--dsw-alias-state-error-primary)}\n.qw-source{display:flex;gap:6px;align-items:center}\n.qw-source select{flex:1;min-width:0}\n.qw-source button{flex:0 0 auto}\n.qw-filters{display:flex;align-items:flex-end;gap:8px 10px;flex-wrap:wrap;margin-bottom:6px}\n.qw-filters .qw-filter{flex:1 1 200px;min-width:150px;max-width:280px}\n.qw-filters button{flex:0 0 auto;margin-bottom:1px}\n.qw-history-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:2px 0 4px}\n.qw-history-check{padding:0;flex:0 0 auto;margin-right:2px}\n.qw-form-foot{flex:0 0 auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:9px;padding-top:8px;border-top:1px solid var(--dsw-alias-border-l1)}\n.qw-form-foot .qw-note{margin:0}\n.qw-list-body{flex:1;min-height:0;overflow:auto;padding-right:4px}\n.qw-item{display:flex;gap:10px;justify-content:space-between;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}\n.qw-item:last-child{border-bottom:0}\n.qw-item-main{flex:1;min-width:0}\n.qw-item h3{font-size:12.5px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--dsw-alias-label-primary);margin:0;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}\n.qw-price{font-weight:500;font-size:11.5px;color:var(--dsw-alias-brand-primary);font-variant-numeric:tabular-nums}\n.qw-item-meta{font-size:10.5px;line-height:1.4;color:var(--dsw-alias-label-secondary);margin:1px 0 0;overflow-wrap:anywhere}\n.qw-item-detail{font-size:10.5px;line-height:1.4;color:var(--dsw-alias-label-secondary);margin:1px 0 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}\n.qw-item-actions{flex:0 0 auto;display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;max-width:46%}\n.qw-root .qw-field-wide{grid-column:1/-1}\n.qw-details{font-size:10.5px;color:var(--dsw-alias-label-secondary);margin-top:4px;overflow-wrap:anywhere}\n.qw-details summary{cursor:pointer;color:var(--dsw-alias-brand-primary)}\n.qw-details p{margin-top:4px}\n.qw-full-text{white-space:pre-wrap}\n.qw-item-actions button{font-size:10.5px;padding:3px 7px}\n.qw-root .qw-check{display:flex;flex-direction:row;align-items:center;color:var(--dsw-alias-label-primary);font-size:12px}\n.qw-root .qw-check input{width:14px;height:14px;accent-color:var(--dsw-alias-brand-primary);flex:0 0 auto}\n.qw-results-body{flex:1;min-height:0;overflow:auto;padding-right:4px}\n.qw-export-bar{flex:0 0 auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:2px 0 8px;margin-bottom:6px;border-bottom:1px solid var(--dsw-alias-border-l1)}\n.qw-export-bar .qw-note{margin:0;flex:1 1 120px;min-width:0}\n.qw-export-bar .qw-export-button{flex:0 0 auto}\n.qw-export-option{flex:0 0 auto;font-size:11px;color:var(--dsw-alias-label-secondary);white-space:nowrap}\n.qw-metric{padding:6px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}\n.qw-metric:last-child{border-bottom:0}\n.qw-metric span{display:block;font-size:10.5px;color:var(--dsw-alias-label-secondary)}\n.qw-metric strong{display:block;font-size:16.5px;font-weight:600;font-variant-numeric:tabular-nums;margin-top:1px;overflow-wrap:anywhere}\n.qw-results-foot{flex:0 0 auto;display:flex;flex-direction:column;gap:5px;padding-top:8px;border-top:1px solid var(--dsw-alias-border-l1)}\n.qw-results-foot button{align-self:flex-start}\n@media(max-width:1100px){.qw-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.qw-body.qw-factory{grid-template-columns:minmax(0,1.4fr) minmax(270px,1fr)}.qw-body.qw-calc{grid-template-columns:minmax(0,1.6fr) minmax(260px,.8fr)}}\n@media(max-width:1080px){.qw-body{display:flex;flex-direction:column;overflow:auto}.qw-form{overflow:visible}.qw-list-body,.qw-results-body{overflow:visible}.qw-columns{grid-template-columns:1fr}.qw-root h1{font-size:16px}.qw-content{padding:12px}}\n@media(max-width:720px){.qw-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.qw-grid.qw-freight-form{grid-template-columns:minmax(0,1fr)}.qw-grid.qw-3col{grid-template-columns:repeat(2,minmax(0,1fr))}.qw-sub{display:none}.qw-foot-note{text-align:left}}\n.qw-settings{height:100%;overflow:auto;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:1.5;padding:4px 0}\n.qw-settings *{box-sizing:border-box}\n.qw-settings-inner{max-width:720px;display:flex;flex-direction:column;gap:10px}\n.qw-settings h2{font-size:16px;font-weight:600;margin:0}\n.qw-settings .qw-note{font-size:12px;color:var(--dsw-alias-label-secondary);margin:0;line-height:1.5;overflow-wrap:anywhere}\n.qw-settings-field{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--dsw-alias-label-secondary)}\n.qw-settings select{font:inherit;font-size:13px;width:100%;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);padding:8px 10px;border-radius:8px}\n.qw-settings select:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}\n.qw-settings-actions{display:flex;gap:8px;margin-top:4px}\n.qw-settings button{font:inherit;font-size:12px;border:1px solid var(--dsw-alias-border-l1);border-radius:7px;background:var(--dsw-alias-bg-layer-1);color:inherit;padding:6px 12px;cursor:pointer}\n.qw-settings button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}\n.qw-settings button:disabled{opacity:.45;cursor:default}\n.qw-settings button.qw-settings-primary{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground);border-color:transparent}\n.qw-settings button.qw-settings-primary:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}\n.qw-settings-error{font-size:12px;color:var(--dsw-alias-state-error-primary);background:var(--dsw-alias-bg-layer-1);border:1px solid currentColor;border-radius:7px;padding:6px 10px;margin:0}\n.qw-settings-status{font-size:12px;color:var(--dsw-alias-state-success-primary);background:var(--dsw-alias-bg-layer-1);border:1px solid currentColor;border-radius:7px;padding:6px 10px;margin:0}\n");
+ const { App, Icon, Settings } = createUI(React, ctx, t, ".qw-root{height:100%;min-height:0;display:flex;flex-direction:column;overflow:hidden;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:1.5}\n.qw-root *{box-sizing:border-box}\n.qw-content{flex:1;min-height:0;width:100%;max-width:1600px;margin:0 auto;padding:14px 18px 10px;display:flex;flex-direction:column;gap:8px}\n.qw-header{flex:0 0 auto;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}\n.qw-brand{display:flex;align-items:baseline;gap:10px;min-width:0}\n.qw-root h1{font-size:18px;font-weight:600;margin:0;white-space:nowrap}\n.qw-sub{font-size:11px;color:var(--dsw-alias-label-secondary);white-space:nowrap}\n.qw-root h2{font-size:13px;font-weight:600;margin:0}\n.qw-root h3{font-size:10.5px;font-weight:600;letter-spacing:.05em;margin:0 0 5px;color:var(--dsw-alias-label-secondary);text-transform:uppercase}\n.qw-root p{margin:0}\n.qw-toolbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}\n.qw-zoom{display:flex;align-items:center;border:1px solid var(--dsw-alias-border-l1);border-radius:7px;overflow:hidden;background:var(--dsw-alias-bg-layer-1)}\n.qw-root .qw-zoom button{border:0;border-radius:0;background:transparent;padding:5px 7px;font-size:11.5px;line-height:1.4;min-width:27px}\n.qw-root .qw-zoom button + button{border-left:1px solid var(--dsw-alias-border-l1)}\n.qw-root .qw-zoom .qw-zoom-value{min-width:44px;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary)}\n.qw-tabs{flex:0 0 auto;display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--dsw-alias-border-l1);padding-bottom:8px}\n.qw-root button{font:inherit;font-size:12px;border:1px solid var(--dsw-alias-border-l1);border-radius:7px;background:var(--dsw-alias-bg-layer-1);color:inherit;cursor:pointer;padding:5px 10px;margin:0;white-space:nowrap}\n.qw-root button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}\n.qw-root button:disabled{opacity:.45;cursor:default}\n.qw-root button[aria-current=page],.qw-root button[aria-pressed=true]{color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-interactive-bg-active);border-color:var(--dsw-alias-brand-primary)}\n.qw-root button.qw-primary{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground);border-color:transparent}\n.qw-root button.qw-primary:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}\n.qw-root :is(input,select,textarea){font:inherit;font-size:12.5px;min-width:0;width:100%;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);padding:5px 7px;border-radius:6px}\n.qw-root :is(input,select,textarea,button):focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}\n.qw-root textarea{resize:vertical;min-height:52px;line-height:1.45}\n.qw-root label{display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--dsw-alias-label-secondary);min-width:0}\n.qw-country-select{position:relative}\n.qw-country-menu{position:absolute;z-index:30;left:0;right:0;top:calc(100% + 4px);max-height:210px;overflow:auto;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:4px}\n.qw-country-option{padding:5px 8px;border-radius:5px;font-size:12px;line-height:1.4;color:var(--dsw-alias-label-primary);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n.qw-country-option.qw-active,.qw-country-option:hover{background:var(--dsw-alias-interactive-bg-hover)}\n.qw-country-option[aria-selected=true]{color:var(--dsw-alias-brand-primary);font-weight:600}\n.qw-country-empty{padding:6px 8px;font-size:11px;color:var(--dsw-alias-label-secondary)}\n.qw-product-menu { overscroll-behavior: contain; }\n.qw-product-option { white-space: normal; overflow-wrap: anywhere; }\n.qw-product-option small { display: block; color: var(--dsw-alias-label-secondary); }\n.qw-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px 10px}\n.qw-grid.qw-freight-form{grid-template-columns:repeat(2,minmax(0,1fr))}\n.qw-grid.qw-3col{grid-template-columns:repeat(3,minmax(0,1fr))}\n.qw-grid > .qw-span-2{grid-column:span 2}\n.qw-modes{display:flex;gap:5px;flex-wrap:wrap;margin:0 0 8px}\n.qw-alerts{flex:0 0 auto;display:flex;flex-direction:column;gap:2px}\n.qw-error{font-size:11.5px;color:var(--dsw-alias-state-error-primary);background:var(--dsw-alias-bg-layer-1);border:1px solid currentColor;border-radius:7px;padding:5px 9px}\n.qw-status{font-size:11.5px;color:var(--dsw-alias-state-success-primary);background:var(--dsw-alias-bg-layer-1);border:1px solid currentColor;border-radius:7px;padding:5px 9px}\n.qw-foot-note{flex:0 0 auto;font-size:10.5px;color:var(--dsw-alias-label-secondary);text-align:right}\n.qw-body{flex:1;min-height:0;display:grid;gap:12px}\n.qw-body.qw-factory{grid-template-columns:minmax(0,1.65fr) minmax(290px,1fr)}\n.qw-body.qw-calc{grid-template-columns:minmax(0,1.9fr) minmax(280px,.8fr)}\n.qw-body.qw-single{display:block;overflow:auto;padding-right:4px}\n.qw-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:start}\n.qw-card{display:flex;flex-direction:column;min-height:0;padding:12px 14px;border:1px solid var(--dsw-alias-border-l1);border-radius:11px;background:var(--dsw-alias-bg-layer-1)}\n.qw-form{overflow:auto;padding-right:12px}\n.qw-list,.qw-results{overflow:hidden}\n.qw-card-head{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;min-height:22px}\n.qw-section{margin-top:4px}\n.qw-section + .qw-section{margin-top:9px}\n.qw-form > textarea{margin-bottom:8px}\n.qw-form > .qw-toolbar{margin-bottom:8px}\n.qw-badge{flex:0 0 auto;font-size:10.5px;color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-l1);border-radius:999px;padding:1px 8px;white-space:nowrap}\n.qw-note{font-size:10.5px;line-height:1.45;color:var(--dsw-alias-label-secondary);margin:3px 0 0;overflow-wrap:anywhere}\n.qw-field-error{font-size:10.5px;line-height:1.35;color:var(--dsw-alias-state-error-primary);margin:0;overflow-wrap:anywhere}\n.qw-root input[aria-invalid=true]{border-color:var(--dsw-alias-state-error-primary)}\n.qw-source{display:flex;gap:6px;align-items:center}\n.qw-source select{flex:1;min-width:0}\n.qw-source button{flex:0 0 auto}\n.qw-filters{display:flex;align-items:flex-end;gap:8px 10px;flex-wrap:wrap;margin-bottom:6px}\n.qw-filters .qw-filter{flex:1 1 200px;min-width:150px;max-width:280px}\n.qw-filters button{flex:0 0 auto;margin-bottom:1px}\n.qw-history-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:2px 0 4px}\n.qw-history-check{padding:0;flex:0 0 auto;margin-right:2px}\n.qw-form-foot{flex:0 0 auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:9px;padding-top:8px;border-top:1px solid var(--dsw-alias-border-l1)}\n.qw-form-foot .qw-note{margin:0}\n.qw-list-body{flex:1;min-height:0;overflow:auto;padding-right:4px}\n.qw-item{display:flex;gap:10px;justify-content:space-between;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}\n.qw-item:last-child{border-bottom:0}\n.qw-item-main{flex:1;min-width:0}\n.qw-item h3{font-size:12.5px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--dsw-alias-label-primary);margin:0;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}\n.qw-price{font-weight:500;font-size:11.5px;color:var(--dsw-alias-brand-primary);font-variant-numeric:tabular-nums}\n.qw-item-meta{font-size:10.5px;line-height:1.4;color:var(--dsw-alias-label-secondary);margin:1px 0 0;overflow-wrap:anywhere}\n.qw-item-detail{font-size:10.5px;line-height:1.4;color:var(--dsw-alias-label-secondary);margin:1px 0 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}\n.qw-item-actions{flex:0 0 auto;display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;max-width:46%}\n.qw-root .qw-field-wide{grid-column:1/-1}\n.qw-details{font-size:10.5px;color:var(--dsw-alias-label-secondary);margin-top:4px;overflow-wrap:anywhere}\n.qw-details summary{cursor:pointer;color:var(--dsw-alias-brand-primary)}\n.qw-details p{margin-top:4px}\n.qw-full-text{white-space:pre-wrap}\n.qw-item-actions button{font-size:10.5px;padding:3px 7px}\n.qw-root .qw-check{display:flex;flex-direction:row;align-items:center;color:var(--dsw-alias-label-primary);font-size:12px}\n.qw-root .qw-check input{width:14px;height:14px;accent-color:var(--dsw-alias-brand-primary);flex:0 0 auto}\n.qw-results-body{flex:1;min-height:0;overflow:auto;padding-right:4px}\n.qw-export-bar{flex:0 0 auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:2px 0 8px;margin-bottom:6px;border-bottom:1px solid var(--dsw-alias-border-l1)}\n.qw-export-bar .qw-note{margin:0;flex:1 1 120px;min-width:0}\n.qw-export-bar .qw-export-button{flex:0 0 auto}\n.qw-export-option{flex:0 0 auto;font-size:11px;color:var(--dsw-alias-label-secondary);white-space:nowrap}\n.qw-metric{padding:6px 0;border-bottom:1px solid var(--dsw-alias-border-l1)}\n.qw-metric:last-child{border-bottom:0}\n.qw-metric span{display:block;font-size:10.5px;color:var(--dsw-alias-label-secondary)}\n.qw-metric strong{display:block;font-size:16.5px;font-weight:600;font-variant-numeric:tabular-nums;margin-top:1px;overflow-wrap:anywhere}\n.qw-results-foot{flex:0 0 auto;display:flex;flex-direction:column;gap:5px;padding-top:8px;border-top:1px solid var(--dsw-alias-border-l1)}\n.qw-results-foot button{align-self:flex-start}\n@media(max-width:1100px){.qw-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.qw-body.qw-factory{grid-template-columns:minmax(0,1.4fr) minmax(270px,1fr)}.qw-body.qw-calc{grid-template-columns:minmax(0,1.6fr) minmax(260px,.8fr)}}\n@media(max-width:1080px){.qw-body{display:flex;flex-direction:column;overflow:auto}.qw-form{overflow:visible}.qw-list-body,.qw-results-body{overflow:visible}.qw-columns{grid-template-columns:1fr}.qw-root h1{font-size:16px}.qw-content{padding:12px}}\n@media(max-width:720px){.qw-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.qw-grid.qw-freight-form{grid-template-columns:minmax(0,1fr)}.qw-grid.qw-3col{grid-template-columns:repeat(2,minmax(0,1fr))}.qw-sub{display:none}.qw-foot-note{text-align:left}}\n.qw-settings{height:100%;overflow:auto;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:1.5;padding:4px 0}\n.qw-settings *{box-sizing:border-box}\n.qw-settings-inner{max-width:720px;display:flex;flex-direction:column;gap:10px}\n.qw-settings h2{font-size:16px;font-weight:600;margin:0}\n.qw-settings .qw-note{font-size:12px;color:var(--dsw-alias-label-secondary);margin:0;line-height:1.5;overflow-wrap:anywhere}\n.qw-settings-field{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--dsw-alias-label-secondary)}\n.qw-settings select{font:inherit;font-size:13px;width:100%;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);padding:8px 10px;border-radius:8px}\n.qw-settings select:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}\n.qw-settings-actions{display:flex;gap:8px;margin-top:4px}\n.qw-settings button{font:inherit;font-size:12px;border:1px solid var(--dsw-alias-border-l1);border-radius:7px;background:var(--dsw-alias-bg-layer-1);color:inherit;padding:6px 12px;cursor:pointer}\n.qw-settings button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}\n.qw-settings button:disabled{opacity:.45;cursor:default}\n.qw-settings button.qw-settings-primary{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground);border-color:transparent}\n.qw-settings button.qw-settings-primary:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}\n.qw-settings-error{font-size:12px;color:var(--dsw-alias-state-error-primary);background:var(--dsw-alias-bg-layer-1);border:1px solid currentColor;border-radius:7px;padding:6px 10px;margin:0}\n.qw-settings-status{font-size:12px;color:var(--dsw-alias-state-success-primary);background:var(--dsw-alias-bg-layer-1);border:1px solid currentColor;border-radius:7px;padding:6px 10px;margin:0}\n.qw-settings input[type=text],.qw-settings input[type=password]{font:inherit;font-size:13px;width:100%;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);padding:8px 10px;border-radius:8px}\n.qw-settings input[type=text]:focus-visible,.qw-settings input[type=password]:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}\n.qw-settings .qw-check{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dsw-alias-label-primary)}\n.qw-settings-sep{border:0;border-top:1px solid var(--dsw-alias-border-l1);margin:14px 0;width:100%}\n.qw-settings-subhead{font-size:13px;font-weight:600;margin:8px 0 0}\n.qw-conflict{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:11px;padding:4px 0;color:var(--dsw-alias-label-primary)}\n.qw-conflict-actions{display:flex;gap:6px;flex:0 0 auto}\nbutton.qw-mini{font:inherit;font-size:11px;padding:2px 8px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;background:var(--dsw-alias-bg-layer-1);color:inherit;cursor:pointer}\nbutton.qw-mini:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}");
  ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({ name: 'sidebar.panellist', id: 'quote-workbench', order: 7, label: () => t('报价工作台') }, Icon));
  ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: 'quote-workbench' }, App));
  ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'quote-workbench', order: 60, label: () => t('报价工作台') }, Settings));

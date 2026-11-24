@@ -12,12 +12,14 @@ const lclFreight = (extra={}) => ({agent:'货代甲',origin:'上海',destination
 const bulkyFreight = (extra={}) => lclFreight({bulky:'是',volume:3,...extra});
 
 test('exports the requested domain API and RMB freight maximum field',()=>{
-  for(const name of ['basic','costs','params','factoryFields','productFields','freightFields','defaults','samples','transportModes','creditCountries','lookupCreditRate','calculate','fcaCost','cfrCost','factoryQuantityKg','validRebate','validateCalculation','parseQuotes','validateRecord','validateDatabase','averageFreights','localDateString','validityDuration','addValidityDate','factoryValidity']) assert.ok(name in d,name);
+  for(const name of ['basic','costs','params','factoryFields','productFields','freightFields','defaults','samples','transportModes','creditCountries','lookupCreditRate','calculate','fcaCost','cfrCost','factoryQuantityKg','validRebate','englishText','validateCalculation','parseQuotes','validateRecord','validateDatabase','averageFreights','localDateString','validityDuration','addValidityDate','factoryValidity']) assert.ok(name in d,name);
   assert.ok(d.costs.some(([key])=>key==='seaMax'));
   assert.ok(d.factoryFields.some(([key])=>key==='purity'));
   assert.ok(d.factoryFields.some(([key])=>key==='quality'));
   assert.ok(d.factoryFields.some(([key])=>key==='hazard'));
   assert.ok(d.productFields.some(([key])=>key==='hazard'));
+  const usa=d.creditCountries.find(country=>country.code==='USA');
+  assert.equal(usa.iso2,'US'); assert.match(usa.english,/United States/);
 });
 test('RMB rebate, insurance, interest and freight bounds retain original formulas',()=>{
   const v=input(), low=d.calculate(v,'rmb'), high=d.calculate({...v,sea:v.seaMax},'rmb');
@@ -59,6 +61,17 @@ test('USD uses purchase and receipt FX separately; reverse mode uses receipt FX,
   const noRebate=d.calculate({...own,rebate:0},'own');
   near(noRebate.rmb,noRebate.unit*own.receive);
 });
+test('USD freight refunds may be negative and reduce C&F cost and profit',()=>{
+  const v={...input('usd'),sea:-50,seaMax:-50};
+  assert.equal(d.validateCalculation(v,'usd'),true);
+  const r=d.calculate(v,'usd');
+  near(r.base,v.buy+v.local/v.fx/v.qty);
+  near(r.landed,r.base-50/v.qty);
+  near(d.cfrCost(v,'usd'),r.landed);
+  near(r.profit,v.qty*v.sell-r.insurance-r.credit-r.interest-r.landed*v.qty);
+  assert.equal(validateHistory(v,r),true);
+});
+function validateHistory(values,result){try{d.validateRecord('history',{mode:'usd',values,result,date:'2026-08-20T00:00:00Z'});return true;}catch{return false;}}
 test('calculation rejects missing, nonfinite and negative amounts in every active mode',()=>{
   const required={rmb:['qty','fx','sell','sea','seaMax','local','tax','rebate','transport','credit','interest','months'],
     usd:['qty','fx','receive','sell','sea','seaMax','local','transport','credit','interest','months'],
@@ -66,7 +79,11 @@ test('calculation rejects missing, nonfinite and negative amounts in every activ
   for(const mode of ['rmb','usd','own']) {
     const v=input(mode); assert.equal(d.validateCalculation(v,mode),true);
     for(const key of required[mode]) {
-      for(const invalid of [null,undefined,'',NaN,Infinity,-1]) assert.equal(d.validateCalculation({...v,[key]:invalid},mode),false,`${mode}/${key}/${invalid}`);
+      for(const invalid of [null,undefined,'',NaN,Infinity,-1]) {
+        const refund = mode === 'usd' && (key === 'sea' || key === 'seaMax') && invalid === -1;
+        const candidate = refund ? {...v,sea:-1,seaMax:-1} : {...v,[key]:invalid};
+        assert.equal(d.validateCalculation(candidate,mode),refund,`${mode}/${key}/${invalid}`);
+      }
     }
     assert.equal(d.validateCalculation({...v,qty:0},mode),false);
     assert.equal(d.validateCalculation({...v,sell:0,sea:0,seaMax:0,local:0},mode),true);
@@ -143,6 +160,14 @@ test('header TSV returns every row and preserves multiline quoted details and ex
   assert.equal(rows[0].purity,'99.5%'); assert.equal(rows[0].quality,'水分≤0.5%，重金属≤10ppm'); assert.equal(rows[0].hazard,'3类 UN1993');
   assert.equal(rows[1].price,''); assert.equal(rows[1].purity,'98%'); assert.equal(rows[1].quality,'外观：白色粉末'); assert.equal(rows[1].hazard,'非危险品');
   assert.deepEqual(d.parseQuotes('产品\t报价明细\n'),[]);
+});
+test('ETD is printable English text and is validated on history records',()=>{
+  assert.equal(d.englishText('Mid Nov 2026'),true);
+  assert.equal(d.englishText('11月'),false);
+  const values={...input('rmb'), etd:'Mid Nov 2026'};
+  const history={mode:'rmb',values,result:d.calculate(values,'rmb'),date:'2026-11-11T00:00:00Z'};
+  assert.equal(d.validateRecord('history',history),history);
+  assert.throws(()=>d.validateRecord('history',{...history,values:{...values,etd:'11月'}}),/ETD/);
 });
 test('record and backup validators throw Chinese errors and preserve legacy histories',()=>{
   const factory={name:'DPG',price:1200,currency:'RMB',unit:'吨',rebate:0};

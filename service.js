@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { basic, costs, params, factoryFields, productFields, freightFields, validateDatabase, validateRecord, validateCalculation, calculate, lookupCreditRate, averageFreights, normalizeCas, normalizeFactoryDate, catalogProducts, extractHazard } from './domain.js';
+import { basic, costs, params, factoryFields, productFields, freightFields, validateDatabase, validateRecord, validateCalculation, calculate, lookupCreditRate, averageFreights, normalizeCas, normalizeFactoryDate, catalogProducts, extractHazard, englishText } from './domain.js';
 import { buildQuotationWorkbook } from './xlsx.js';
 
 const INCOTERMS = ['EXW', 'FCA', 'FOB', 'CFR', 'CIF'];
@@ -23,7 +23,7 @@ const SYSTEM_PROMPT = `你是报价工作台的报价提取器。用户会粘贴
 - quoteDate：报价日期，尽量规范为 YYYY-MM-DD；没有留空，不要用当前日期补填
 - factory：工厂名称（英文）；没有留空
 - details：这一条报价的完整明细（英文翻译，保留数字、CAS、UN、日期、币种和 Incoterm）；没有留空
-- quantity：数量口径（英文，如 22t/20GP、1000 kg）；没有留空
+- quantity：数量，只填阿拉伯数字（如 22、1000），不要带单位、柜型或逗号；没有留空或 null
 - validity：报价有效期（英文）。原文写的是期限（如 "30 days"、"two weeks"、"一个月"）就原样输出该期限，由工作台按报价日期加该期限计算；原文写的是具体日期就输出 YYYY-MM-DD；没有留空
 - price：报价单价，纯数字；有多个价格、价格区间或标题行时填 null
 - currency："USD" 或 "RMB"
@@ -129,6 +129,7 @@ export function sanitizeQuoteRecords(output, raw) {
     const rebate = noteNumber(row.rebate);
     const currencyText = plainText(row.currency, 10).toUpperCase();
     const incotermText = plainText(row.incoterm, 10).toUpperCase();
+    const quantity = (plainText(row.quantity).replaceAll(',', '').match(/\d+(?:\.\d+)?/) ?? [''])[0];
     return {
       name: plainText(row.name),
       purity: plainText(row.purity ?? row.content ?? row.assay, 100),
@@ -138,7 +139,7 @@ export function sanitizeQuoteRecords(output, raw) {
       quoteDate: normalizeFactoryDate(plainText(row.quoteDate, 100)),
       factory: plainText(row.factory),
       details,
-      quantity: plainText(row.quantity),
+      quantity,
       validity: plainText(row.validity),
       price: price !== null && price > 0 ? price : null,
       currency: currencyText === 'USD' || currencyText === 'RMB' ? currencyText : detectCurrency(details),
@@ -158,17 +159,24 @@ export function sanitizeQuoteRecords(output, raw) {
 }
 
 export class QuoteWorkbench {
-  constructor(storage, llm, defaultSelection) {
+  constructor(storage, llm, defaultSelection, sync) {
     this.storage = storage;
     this.llm = llm;
     this.defaultSelection = defaultSelection ?? (() => null);
+    this.sync = sync ?? null;
     this.tail = Promise.resolve();
   }
   async execute(input, signal) {
     if (!input || typeof input !== 'object') throw Error('操作参数必须是对象');
+    const syncWrite = ['syncSetup', 'syncNow', 'syncResolve', 'syncAuth', 'syncLogout'].includes(input.action);
     const write = ['add', 'update', 'delete', 'import', 'saveSettings'].includes(input.action);
-    if (!write) return this.perform(input, signal);
-    const task = this.tail.then(() => this.perform(input, signal));
+    if (!write && !syncWrite) return this.perform(input, signal);
+    const task = this.tail.then(async () => {
+      const result = await this.perform(input, signal);
+      // 业务写入成功后，后台把受影响记录推到飞书；失败只标记待同步，绝不阻塞本地写入。
+      if (write && !['saveSettings'].includes(input.action) && this.sync) this.sync.schedulePush();
+      return result;
+    });
     this.tail = task.catch(() => {});
     return task;
   }
@@ -253,6 +261,7 @@ export class QuoteWorkbench {
       const items = rawItems.map(item => {
         if (!validateCalculation(item?.values, item?.mode)) throw Error('核算数据不完整或超出有效范围');
         if (!item.values.product?.trim()) throw Error('请先填写产品名称再导出报价单');
+        if (!englishText(item.values.etd)) throw Error('ETD 只能输入英文字符、数字和标点。');
         let factory = item.factoryId ? db.factories.find(row => row.id === item.factoryId) : null;
         if (!factory && item.factory && typeof item.factory === 'object' && !Array.isArray(item.factory)) factory = item.factory;
         if (!factory && item.mode !== 'own') throw Error('缺少对应工厂报价，请重新选择工厂报价后再输出');
@@ -278,6 +287,48 @@ export class QuoteWorkbench {
         base64: file.buffer.toString('base64'),
         generatedAt: file.generatedAt,
       };
+    }
+    if (action === 'syncStatus') {
+      if (!this.sync) throw Error('同步服务未启用');
+      return this.sync.status();
+    }
+    if (action === 'syncSetup') {
+      if (!this.sync) throw Error('同步服务未启用');
+      return this.sync.setup(input);
+    }
+    if (action === 'syncNow') {
+      if (!this.sync) throw Error('同步服务未启用');
+      return this.sync.now();
+    }
+    if (action === 'syncResolve') {
+      if (!this.sync) throw Error('同步服务未启用');
+      return this.sync.resolve(input);
+    }
+    if (action === 'syncAuthUrl') {
+      if (!this.sync) throw Error('同步服务未启用');
+      return { url: await this.sync.authorizeUrl(input.base) };
+    }
+    if (action === 'syncAuth') {
+      if (!this.sync) throw Error('同步服务未启用');
+      await this.sync.exchangeCode(input.code);
+      return this.sync.status();
+    }
+    if (action === 'syncLogout') {
+      if (!this.sync) throw Error('同步服务未启用');
+      await this.sync.logout();
+      return this.sync.status();
+    }
+    if (action === 'syncInspect') {
+      if (!this.sync) throw Error('同步服务未启用');
+      return this.sync.inspectTables();
+    }
+    if (action === 'syncEnsureTables') {
+      if (!this.sync) throw Error('同步服务未启用');
+      return this.sync.ensureTablesOnly();
+    }
+    if (action === 'syncSample') {
+      if (!this.sync) throw Error('同步服务未启用');
+      return { kind: String(input.kind || 'factories'), records: await this.sync.sampleRemote(String(input.kind || 'factories'), Number(input.limit) || 2) };
     }
     if (!['add', 'update', 'delete', 'import', 'saveSettings'].includes(action)) throw Error('未知操作');
     if (input.revision !== stored.revision) throw Error('记录已更新，请刷新后重试，避免覆盖其他窗口的修改');
@@ -367,6 +418,19 @@ export class QuoteWorkbench {
         const saved = { ...next, id: randomUUID() };
         if (input.kind === 'products') db.products.push(saved);
         else db[input.kind].unshift(saved);
+      }
+    }
+    if (this.sync) {
+      if (action === 'import') {
+        for (const key of ['factories', 'freights', 'history', 'products']) this.sync.mark('import', key, db[key].map(row => row.id));
+      } else if (action === 'delete') {
+        this.sync.mark('delete', input.kind, [input.id]);
+      } else if (action === 'update') {
+        this.sync.mark('update', input.kind, [input.id]);
+      } else {
+        // add：新记录 id 是刚生成的 saved.id（在 else 分支内局部变量）；从 db 头部取最新记录。
+        const created = input.kind === 'products' ? db.products[db.products.length - 1] : db[input.kind][0];
+        if (created) this.sync.mark('add', input.kind, [created.id]);
       }
     }
     db.revision++;

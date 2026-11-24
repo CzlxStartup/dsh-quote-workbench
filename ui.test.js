@@ -155,6 +155,7 @@ async function mount(t, seed = {}, parseResponses = [], storedSession = null) {
     get tree() { return driver.tree; },
     async remount() { driver.reset(); driver.mount(App); await driver.flush(); },
     async reload() { App = createApp(); driver.reset(); driver.mount(App); await driver.flush(); },
+    async flush() { await driver.flush(); },
     button(label, scope = driver.tree) { return one(all(scope, n => n.type === 'button' && text(n) === label), `button ${label}`); },
     field(label) {
       const aria = all(driver.tree, n => ['input', 'select', 'textarea'].includes(n.type) && n.props['aria-label'] === label);
@@ -218,6 +219,7 @@ test('calculation exports an editable quotation with the active factory source',
   assert.equal(ui.button('输出报价单').props.disabled, true);
   await ui.click('载入 Excel 样例');
   assert.equal(ui.button('输出报价单').props.disabled, true);
+  await ui.change('ETD（预计开船日）', 'Mid November 2026');
   await ui.change('选取工厂报价', 'rmb');
   assert.equal(ui.button('输出报价单').props.disabled, false);
   assert.match(ui.button('输出报价单').props.className, /qw-export-button/);
@@ -232,6 +234,7 @@ test('calculation exports an editable quotation with the active factory source',
   assert.equal(request.items[0].values.product, 'Quote rmb');
   assert.equal(request.items[0].values.qty, 20000);
   assert.equal(request.items[0].values.sell, 2.33);
+  assert.equal(request.items[0].values.etd, 'Mid November 2026');
   assert.deepEqual(ui.downloads, ['Quotation_Test.xlsx']);
   assert.match(text(ui.tree), /已生成 Quotation_Test\.xlsx/);
   assert.equal(ui.memory.revision, 7, 'exporting must not write records');
@@ -250,6 +253,17 @@ test('customer-only export can be selected and excludes Costing', async t => {
   assert.equal(request.items.length, 1);
   assert.deepEqual(ui.downloads, ['Quotation_Test.xlsx']);
   assert.match(text(ui.tree), /仅含客户 Quotation 页/);
+});
+
+test('ETD is free text restricted to English characters, digits and punctuation', async t => {
+  const ui = await mount(t);
+  await ui.click('报价核算');
+  await ui.change('ETD（预计开船日）', 'Mid Nov 2026');
+  assert.equal(ui.field('ETD（预计开船日）').props.value, 'Mid Nov 2026');
+  assert.equal(ui.field('ETD（预计开船日）').props.type, 'text');
+  await ui.change('ETD（预计开船日）', '11月');
+  assert.equal(ui.field('ETD（预计开船日）').props['aria-invalid'], true);
+  assert.ok(all(ui.tree, n => n.type === 'span' && text(n) === 'ETD 只能输入英文字符、数字和标点').length);
 });
 
 test('factory source options filter currency, usable units/prices and normalized CAS; mode changes clear selection', async t => {
@@ -339,6 +353,10 @@ test('saving a calculation remembers its VAT and rebate for the CAS', async t =>
   assert.equal(ui.button('保存本次核算').props.disabled, false);
   await ui.click('保存本次核算');
   assert.equal(ui.memory.history.length, 1);
+  assert.equal(ui.field('产品 / 规格').props.value, '');
+  assert.equal(ui.field('数量 kg').props.value, '');
+  assert.equal(ui.button('保存本次核算').props.disabled, true);
+  assert.match(text(ui.tree), /已保存，核算页面已清空/);
 
   await ui.click('载入 Excel 样例');
   assert.equal(ui.field('增值税率 %').props.value, 13, 'the sample resets the rates');
@@ -509,6 +527,28 @@ test('structured text blocks Chinese except the factory name', async t => {
   assert.equal(ui.field('CAS 号').props['aria-invalid'], undefined);
 });
 
+test('factory quantity accepts Arabic digits only and blocks other characters', async t => {
+  const ui = await mount(t);
+  await ui.click('工厂报价');
+  await ui.change('数量', '22');
+  assert.equal(ui.field('数量').props['aria-invalid'], undefined);
+  await ui.change('数量', '22t');
+  assert.equal(ui.field('数量').props['aria-invalid'], true);
+  assert.ok(all(ui.tree, n => n.props.className === 'qw-field-error' && text(n) === '数量只能填写阿拉伯数字').length >= 1);
+  await ui.change('产品', 'ProductQ');
+  await ui.change('报价单价', 100);
+  await ui.change('币种', 'RMB');
+  await ui.change('计价单位', '公斤');
+  await ui.change('退税率 %（不退税填 0）', 0);
+  await ui.click('确认并保存报价');
+  assert.equal(ui.memory.factories.length, 0, 'non-digit quantity blocks saving');
+  assert.match(text(one(all(ui.tree, n => n.props.role === 'alert'), 'error')), /数量只能填写阿拉伯数字/);
+  await ui.change('数量', '20');
+  await ui.click('确认并保存报价');
+  assert.equal(ui.memory.factories.length, 1);
+  assert.equal(ui.memory.factories[0].quantity, '20');
+});
+
 test('own-factory reverse page uses receipt FX, min/max freight, VAT and rebate for its range', async t => {
   const ui = await mount(t);
   await ui.click('报价核算'); await ui.click('自有工厂倒推');
@@ -547,7 +587,7 @@ test('legacy own history copies its purchase FX into receipt FX and seeds min/ma
   const ui = await mount(t, { history: [{ id: 'own', mode: 'own', date: '2026-11-01T00:00:00Z', values, result }] });
   await ui.click('核算记录');
   assert.match(text(ui.article('旧倒推')), /人民币含税倒推价 RMB\/kg: 1\.00/);
-  await ui.click('查看 / 复制重算', ui.article('旧倒推'));
+  await ui.click('编辑', ui.article('旧倒推'));
   assert.equal(ui.field('收汇汇率 RMB/USD').props.value, 7);
   assert.equal(ui.field('最低国际运费 USD/票').props.value, 100);
   assert.equal(ui.field('最高国际运费 USD/票').props.value, 100);
@@ -556,23 +596,28 @@ test('legacy own history copies its purchase FX into receipt FX and seeds min/ma
   assert.equal(ui.memory.history[0].values.seaMax, undefined);
 });
 
-test('selecting a factory quote auto-fills cost fields, converts tonnes, preserves customer Incoterm and current purchase mode', async t => {
+test('selecting a factory quote auto-fills cost fields, converts tonnes, preserves customer Incoterm, place and current purchase mode', async t => {
   const ui = await mount(t, { factories: [factory('rmb'), factory('usd', { currency: 'USD', price: 2100 })] });
-  await ui.click('报价核算'); await ui.change('Incoterm', 'CIF');
+  await ui.click('报价核算'); await ui.change('Incoterm', 'CIF'); await ui.change('交货地点 / 港口', 'Oslo');
   await ui.change('选取工厂报价', 'rmb');
   assert.equal(ui.field('含税采购单价 RMB/kg').props.value, 14);
   assert.equal(ui.field('产品 / 规格').props.value, 'Quote rmb');
   assert.equal(ui.field('CAS 号').props.value, '67-68-5');
-  assert.equal(ui.field('交货地点 / 港口').props.value, 'Qingdao');
+  assert.equal(ui.field('交货地点 / 港口').props.value, 'Oslo', 'factory port must not overwrite the customer place');
   assert.equal(ui.field('退税率 %').props.value, 13);
   assert.equal(ui.field('Incoterm').props.value, 'CIF');
   assert.equal(ui.button('人民币采购').props['aria-pressed'], true);
-  assert.match(text(one(all(ui.tree, n => n.props.role === 'status'), 'status')), /已自动填入工厂报价/);
+  const status = text(one(all(ui.tree, n => n.props.role === 'status'), 'status'));
+  assert.match(status, /已自动填入工厂报价/);
+  assert.match(status, /请补充交货地点、运费和汇率/);
   await ui.click('带入成本');
   assert.equal(ui.field('含税采购单价 RMB/kg').props.value, 14);
+  assert.equal(ui.field('交货地点 / 港口').props.value, 'Oslo');
   assert.equal(ui.field('Incoterm').props.value, 'CIF');
   assert.equal(ui.button('人民币采购').props['aria-pressed'], true);
   assert.equal(ui.field('退税率 %').props.value, 13);
+  await ui.click('工厂报价'); await ui.click('带入核算', ui.article('Quote rmb'));
+  assert.equal(ui.field('交货地点 / 港口').props.value, 'Oslo', 'bring-in from the factory list must keep the place too');
   await ui.click('工厂报价'); await ui.click('带入核算', ui.article('Quote usd'));
   assert.equal(ui.button('美元采购').props['aria-pressed'], true);
   assert.equal(ui.field('采购单价 USD/kg').props.value, 2.1);
@@ -586,6 +631,7 @@ test('auto-filled factory fields produce a calculation once quantity, freight an
   await ui.change('对客单价 USD/kg', 2.33);
   await ui.change('收汇汇率 RMB/USD', 6.67);
   await ui.change('最低国际运费 USD/票', 5000);
+  await ui.change('最高国际运费 USD/票', 7000);
   await ui.change('国内费用总额 RMB/票', 2000);
   await ui.change('信用保险费率 %', 0.441);
   await ui.change('选取工厂报价', 'rmb');
@@ -593,8 +639,10 @@ test('auto-filled factory fields produce a calculation once quantity, freight an
   assert.equal(ui.field('数量 kg').props.value, 20000);
   assert.equal(ui.button('保存本次核算').props.disabled, false);
   const results = text(one(all(ui.tree, n => n.props.className === 'qw-results-body'), 'results body'));
-  assert.match(results, /预计利润 USD/);
-  assert.match(results, /采购成本利润率/);
+  assert.match(results, /C&F 成本 USD\/kg2\.1225 ～ 2\.2225/);
+  assert.match(results, /预计利润 USD[\d,]+\.\d+ ～ [\d,]+\.\d+/);
+  assert.match(results, /采购成本利润率[\d,]+\.\d+% ～ [\d,]+\.\d+%/);
+  assert.doesNotMatch(results, /会显示区间/);
 });
 
 test('C&F cost appears from cost inputs without selling price, credit rate or max freight', async t => {
@@ -610,9 +658,11 @@ test('C&F cost appears from cost inputs without selling price, credit rate or ma
   assert.match(results, /C&F 成本 USD\/kg/);
   assert.match(results, /2\.1225/);
   assert.doesNotMatch(results, /请补全/);
+  assert.match(results, /填写高于最低运费的「最高国际运费」后/);
   await ui.change('最高国际运费 USD/票', 7000);
   results = text(one(all(ui.tree, n => n.props.className === 'qw-results-body'), 'results body'));
   assert.match(results, /2\.1225 ～ 2\.2225/);
+  assert.doesNotMatch(results, /填写高于最低运费的「最高国际运费」后/);
 });
 
 test('USD factory quote shows min/max freight, hides VAT and shows C&F cost before selling and credit inputs', async t => {
@@ -739,7 +789,7 @@ test('copied history keeps a months value that differed from its term', async t 
   const result = { base: 2, landed: 2.1, profit: 1000, margin: .1, rmb: 7000, insurance: 0, credit: 0, interest: 0 };
   const ui = await mount(t, { history: [{ id: 'five', mode: 'rmb', date: '2026-11-01T00:00:00Z', values, result }] });
   await ui.click('核算记录');
-  await ui.click('查看 / 复制重算', ui.article('历史月数'));
+  await ui.click('编辑', ui.article('历史月数'));
   assert.equal(ui.field('账期（月）').props.value, 2);
   assert.equal(ui.field('资金占用月数').props.value, 5);
   await ui.change('账期（月）', 3);
@@ -856,6 +906,79 @@ test('factory quote stores and displays purity, quality and cargo hazard', async
   assert.equal(ui.field('货物危险性').props.value, 'Class 3 UN1993');
 });
 
+test('calculation product search ranks name matches and only applies a recommendation when chosen', async t => {
+  const ui = await mount(t, { products: [
+    { name: 'Propylene Glycol', cas: '57-55-6', tax: 13, rebate: 9 },
+    { name: 'Propylene Glycol USP', cas: '25322-69-4' },
+    { name: 'Ethylene Glycol', cas: '107-21-1' },
+  ] });
+  await ui.click('报价核算');
+  const field = () => ui.field('产品 / 规格');
+  const options = () => all(ui.tree, n => n.props.role === 'option' && n.props.id?.startsWith('qw-product-suggestion-'));
+  const key = async value => {
+    field().props.onKeyDown({ key: value, preventDefault() {}, stopPropagation() {} });
+    await ui.flush();
+  };
+  await ui.change('产品 / 规格', 'Ｇｌｙｃｏｌ');
+  assert.equal(options().length, 3, 'search normalizes width and matches inside a name');
+  await ui.change('产品 / 规格', 'propylene glycol');
+  assert.match(text(options()[0]), /CAS 57-55-6/);
+  await ui.change('产品 / 规格', 'Propylene Gylcol');
+  assert.equal(options().length, 1);
+  assert.match(text(options()[0]), /CAS 57-55-6 · 相似/);
+  await key('Enter');
+  assert.equal(ui.field('CAS 号').props.value, '');
+  await key('ArrowDown');
+  assert.equal(field().props['aria-activedescendant'], options()[0].props.id);
+  await key('Enter');
+  assert.equal(field().props.value, 'Propylene Glycol');
+  assert.equal(ui.field('CAS 号').props.value, '57-55-6');
+  assert.equal(ui.field('退税率 %').props.value, 9);
+  await ui.change('含税采购单价 RMB/kg', '14');
+  await ui.change('产品 / 规格', 'Ethylene');
+  assert.equal(ui.field('CAS 号').props.value, '57-55-6');
+  options()[0].props.onClick(); await ui.flush();
+  assert.equal(ui.field('CAS 号').props.value, '107-21-1');
+  assert.equal(ui.field('含税采购单价 RMB/kg').props.value, '');
+  assert.equal(ui.field('退税率 %').props.value, '');
+  await ui.click('自有工厂倒推');
+  await ui.change('产品 / 规格', 'Custom New Product');
+  assert.equal(options().length, 0);
+  assert.match(text(ui.tree), /可继续手动输入/);
+  await key('Escape');
+  assert.equal(field().props.value, 'Custom New Product');
+  assert.equal(field().props['aria-expanded'], false);
+});
+
+test('quote country combobox opens and lists matching countries while typing', async t => {
+  const ui = await mount(t);
+  await ui.click('报价核算');
+  const field = () => ui.field('报价国家 / 地区');
+  const countries = () => all(ui.tree, n => typeof n.props.className === 'string' && n.props.className.startsWith('qw-country-option')).map(text);
+  assert.equal(field().props.value, '');
+  field().props.onFocus({ target: { select() {} } });
+  await ui.flush();
+  assert.ok(countries().length > 100, 'focus opens the country list without clicking a select');
+  await ui.change('报价国家 / 地区', '美国');
+  assert.equal(countries().length, 1);
+  assert.ok(countries()[0].includes('USA') && countries()[0].includes('美国'));
+  await ui.change('报价国家 / 地区', 'united');
+  assert.ok(countries().some(value => value.includes('USA')));
+  assert.ok(countries().some(value => value.includes('GBR')));
+  await ui.change('报价国家 / 地区', 'gbr');
+  assert.equal(countries().length, 1);
+  assert.ok(countries()[0].includes('GBR'));
+  await ui.change('报价国家 / 地区', 'zzzz');
+  assert.deepEqual(countries(), []);
+  await ui.change('报价国家 / 地区', '日本');
+  assert.equal(countries().length, 1);
+  const option = all(ui.tree, n => typeof n.props.className === 'string' && n.props.className.startsWith('qw-country-option'))[0];
+  option.props.onMouseDown({ preventDefault() {}, stopPropagation() {} });
+  await ui.flush();
+  assert.ok(field().props.value.includes('日本'));
+  assert.ok(field().props.value.includes('JPN'));
+});
+
 test('editing a saved factory uses update and revision, preserves legacy dates/raw and does not append', async t => {
   const original = factory('existing', { validity: '报价后一周', quoteDate: '2026/11/01', raw: '原始报价明细', details: '报价详细说明' });
   const ui = await mount(t, { factories: [original] });
@@ -863,7 +986,7 @@ test('editing a saved factory uses update and revision, preserves legacy dates/r
   assert.equal(ui.field('报价日期').props.value, '2026-11-01');
   assert.equal(ui.field('报价有效期').props.value, '');
   assert.equal(ui.field('原始报价 / Excel 表格').props.value, original.raw);
-  await ui.change('报价单价', '15000'); await ui.click('保存修改');
+  await ui.change('报价单价', '15000'); await ui.click('覆盖原报价');
   const updates = ui.requests.filter(r => r.action === 'update');
   assert.equal(updates.length, 1); assert.equal(updates[0].id, original.id);
   assert.equal(updates[0].revision, 7); assert.equal(updates[0].kind, 'factories');
@@ -873,6 +996,56 @@ test('editing a saved factory uses update and revision, preserves legacy dates/r
   assert.equal(ui.memory.factories.length, 1);
   assert.equal(ui.memory.factories[0].createdAt, original.createdAt);
   assert.ok(ui.button('确认并保存报价'));
+  assert.match(text(one(all(ui.tree, n => n.props.role === 'status'), 'status')), /已覆盖原报价/);
+});
+
+test('editing a saved factory offers save-as-new without overwriting the original', async t => {
+  const original = factory('existing', { name: 'OriginalQuote', price: 14000 });
+  const ui = await mount(t, { factories: [original] });
+  await ui.click('编辑', ui.article('OriginalQuote'));
+  assert.ok(ui.button('覆盖原报价'));
+  assert.ok(ui.button('另存为新报价'));
+  assert.equal(all(ui.tree, n => n.type === 'button' && text(n) === '确认并保存报价').length, 0, 'edit mode offers explicit overwrite or copy instead of one save button');
+  await ui.change('产品', 'CopiedQuote');
+  await ui.change('报价单价', '15500');
+  await ui.click('另存为新报价');
+  assert.equal(ui.requests.filter(r => r.action === 'update').length, 0, 'save-as-new must not overwrite the original');
+  const add = one(ui.requests.filter(r => r.action === 'add'), 'add request');
+  assert.equal(add.kind, 'factories');
+  assert.equal(add.record.name, 'CopiedQuote');
+  assert.equal(add.record.price, 15500);
+  assert.equal(ui.memory.factories.length, 2);
+  const kept = ui.memory.factories.find(row => row.id === original.id);
+  assert.equal(kept.name, 'OriginalQuote');
+  assert.equal(kept.price, 14000);
+  assert.equal(ui.field('产品').props.value, '', 'the editor resets after saving a copy');
+  assert.ok(ui.button('确认并保存报价'));
+  assert.match(text(one(all(ui.tree, n => n.props.role === 'status'), 'status')), /已另存为新的报价/);
+});
+
+test('factory row copy opens a new draft and preserves legacy dates and raw text', async t => {
+  const original = factory('existing', { quoteDate: 'November 2026', validity: '报价后一周', raw: '原始报价' });
+  const ui = await mount(t, { factories: [original] });
+  await ui.click('编辑', ui.article(original.name));
+  await ui.click('复制', ui.article(original.name));
+  assert.match(text(ui.tree), /已复制到新报价草稿/);
+  assert.equal(ui.memory.revision, 7);
+  assert.equal(ui.field('产品').props.value, original.name);
+  assert.equal(ui.field('原始报价 / Excel 表格').props.value, original.raw);
+  assert.equal(all(ui.tree, n => n.type === 'button' && text(n) === '覆盖原报价').length, 0);
+  await ui.remount();
+  assert.equal(ui.field('报价日期').props.value, '');
+  await ui.change('报价单价', 15500);
+  await ui.click('确认并保存报价');
+  assert.equal(ui.requests.some(r => r.action === 'update'), false);
+  const { record } = one(ui.requests.filter(r => r.action === 'add'), 'factory copy add');
+  assert.equal(record.id, undefined);
+  assert.equal(record.createdAt, undefined);
+  assert.equal(record.quoteDate, original.quoteDate);
+  assert.equal(record.validity, original.validity);
+  assert.equal(record.raw, original.raw);
+  assert.equal(record.price, 15500);
+  assert.deepEqual(ui.memory.factories[0], original);
 });
 
 test('factory quote defaults to today and an AI period becomes quote date plus that period', async t => {
@@ -926,11 +1099,12 @@ test('cancel editing causes no mutation; stale revision shows error and retains 
   assert.equal(ui.requests.filter(r => ['update', 'add', 'delete'].includes(r.action)).length, 0);
   await ui.click('编辑', ui.article('Quote existing')); await ui.change('报价单价', '17000');
   ui.memory.revision++; // Another client changes the server snapshot, in memory only.
-  await ui.click('保存修改');
+  await ui.click('覆盖原报价');
   assert.equal(ui.memory.factories[0].price, 14000);
   assert.equal(ui.field('报价单价').props.value, 17000);
   assert.equal(text(one(all(ui.tree, n => n.props.role === 'alert'), 'conflict alert')), '记录已更新，请刷新后重试。');
-  assert.ok(ui.button('保存修改'));
+  assert.ok(ui.button('覆盖原报价'));
+  assert.ok(ui.button('另存为新报价'));
 });
 
 test('catalog save/search and bring-in drive both forms; CAS autofill clears only generated names', async t => {
@@ -1145,11 +1319,12 @@ test('old history reconstructs freight range and copy falls back to tax rebate a
   const rangeRow = ui.article('旧记录');
   const formatted = n => n.toLocaleString('zh-CN', { maximumFractionDigits: 4, minimumFractionDigits: 2 });
   assert.ok(text(rangeRow).includes(`${formatted(profit - 200)} ～ ${formatted(profit)}`), 'history must calculate high-freight fallback, not repeat the low result');
-  await ui.click('查看 / 复制重算', rangeRow);
+  assert.match(text(rangeRow), /C&F 成本 USD\/kg: .* ～ /);
+  await ui.click('编辑', rangeRow);
   assert.equal(ui.field('最高国际运费 USD/票').props.value, 300);
   assert.equal(ui.field('退税率 %').props.value, 13);
   assert.equal(ui.field('Incoterm').props.value, '待确认');
-  await ui.click('核算记录'); await ui.click('查看 / 复制重算', ui.article('旧单值记录'));
+  await ui.click('核算记录'); await ui.click('编辑', ui.article('旧单值记录'));
   assert.equal(ui.field('最高国际运费 USD/票').props.value, 100);
   assert.equal(ui.field('最低国际运费 USD/票').props.value, 100);
   assert.equal(ui.button('另存为新记录').props.disabled, false);
@@ -1164,7 +1339,7 @@ test('history edit can overwrite the original record or save as a new record', a
   const result = { base: 2, landed: 2.1, profit: 1000, margin: .1, rmb: 7000, insurance: 0, credit: 0, interest: 0 };
   const ui = await mount(t, { history: [{ id: 'original', mode: 'rmb', date: '2026-11-01T00:00:00Z', values, result }] });
   await ui.click('核算记录');
-  await ui.click('查看 / 复制重算', ui.article('EditableRecord'));
+  await ui.click('编辑', ui.article('EditableRecord'));
   assert.ok(ui.button('另存为新记录'));
   assert.ok(ui.button('覆盖原记录'));
   assert.equal(all(ui.tree, n => n.type === 'button' && text(n) === '保存本次核算').length, 0);
@@ -1176,15 +1351,50 @@ test('history edit can overwrite the original record or save as a new record', a
   assert.equal(update.record.values.sell, 6);
   assert.equal(ui.memory.history.length, 1);
   assert.equal(ui.memory.history[0].values.sell, 6);
-  assert.match(text(ui.tree), /已覆盖原核算记录/);
+  assert.match(text(ui.tree), /已覆盖原核算记录，核算页面已清空/);
+  assert.equal(ui.field('产品 / 规格').props.value, '');
+  assert.equal(ui.field('对客单价 USD/kg').props.value, '');
+  assert.equal(all(ui.tree, n => n.type === 'button' && text(n) === '另存为新记录').length, 0);
+  assert.equal(all(ui.tree, n => n.type === 'button' && text(n) === '覆盖原记录').length, 0);
+  assert.equal(ui.button('保存本次核算').props.disabled, true);
+
+  await ui.click('核算记录');
+  await ui.click('编辑', ui.article('EditableRecord'));
   await ui.change('对客单价 USD/kg', 7);
   await ui.click('另存为新记录');
   const add = ui.requests.find(r => r.action === 'add' && r.kind === 'history');
   assert.equal(add.record.values.sell, 7);
   assert.equal(ui.memory.history.length, 2);
   assert.equal(ui.memory.history.at(-1).values.sell, 7);
-  assert.match(text(ui.tree), /已另存为新的核算记录/);
+  assert.match(text(ui.tree), /已另存为新的核算记录，核算页面已清空/);
+  assert.equal(ui.field('产品 / 规格').props.value, '');
   assert.equal(all(ui.tree, n => n.type === 'button' && text(n) === '保存本次核算').length, 1);
+});
+
+test('history row copy clears the edit target and preserves the factory and calculation inputs', async t => {
+  const source = factory('source', { cas: '67-68-5' });
+  const values = { product: 'Original', cas: source.cas, customerTerm: 'CFR', qty: 1000, sell: 5, buy: 14, fx: 7,
+    sea: 100, seaMax: 300, local: 0, tax: 13, rebate: 13, transport: 0, credit: 0, interest: 0, months: 2, creditMonths: 3 };
+  const result = { base: 2, landed: 2.1, profit: 1000, margin: .1, rmb: 7000, insurance: 0, credit: 0, interest: 0 };
+  const original = { id: 'original', mode: 'rmb', date: '2026-11-01T00:00:00Z', factoryId: source.id, values, result };
+  const ui = await mount(t, { factories: [source], history: [original] });
+  await ui.click('核算记录');
+  await ui.click('编辑', ui.article('Original'));
+  await ui.click('核算记录');
+  await ui.click('复制', ui.article('Original'));
+  assert.match(text(ui.tree), /已复制到新核算草稿/);
+  assert.equal(ui.memory.revision, 7);
+  assert.equal(all(ui.tree, n => n.type === 'button' && text(n) === '覆盖原记录').length, 0);
+  await ui.change('对客单价 USD/kg', 6);
+  await ui.click('保存本次核算');
+  assert.equal(ui.requests.some(r => r.action === 'update'), false);
+  const { record } = one(ui.requests.filter(r => r.action === 'add'), 'history copy add');
+  assert.equal(record.factoryId, source.id);
+  assert.equal(record.values.seaMax, values.seaMax);
+  assert.equal(record.values.months, values.months);
+  assert.equal(record.values.customerTerm, values.customerTerm);
+  assert.equal(record.values.sell, 6);
+  assert.deepEqual(ui.memory.history[0], original);
 });
 
 test('history page filters by CAS and customer keywords without touching stored records', async t => {
@@ -1237,7 +1447,7 @@ test('history page filters by CAS and customer keywords without touching stored 
   await ui.click('核算记录');
   assert.equal(ui.field('按客户名称筛选核算记录').props.value, 'stim', 'filters survive page switches');
   assert.equal(shown().length, 1);
-  await ui.click('查看 / 复制重算', ui.article('DPG'));
+  await ui.click('编辑', ui.article('DPG'));
   assert.equal(ui.field('客户').props.value, 'STIM');
   assert.equal(JSON.stringify(ui.memory.history), before, 'filtering and copying must not mutate saved records');
   assert.equal(ui.requests.filter(r => ['add', 'update', 'delete', 'import'].includes(r.action)).length, 0);

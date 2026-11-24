@@ -1,7 +1,7 @@
 // Pure business rules extracted from the original quotation workbench.
 // No DOM, storage, or runtime service dependencies.
 const transportModes=['海运整柜','海运拼箱','空运','铁路','公路','快递','其他'];
-const basic=[['cas','CAS 号','text'],['transportMode','运输方式',['',...transportModes]],['product','产品 / 规格','text'],['customer','客户','text'],['quoteCountry','报价国家 / 地区',['']],['creditMonths','账期（月）','number'],['creditPayment','信保付款方式',['','L/C','D/P','D/A 或 O/A']],['qty','数量 kg','number'],['sell','对客单价 USD/kg','number'],['customerTerm','Incoterm',['待确认','EXW','FCA','FOB','CFR','CIF','其他']],['place','交货地点 / 港口','text']];
+const basic=[['cas','CAS 号','text'],['transportMode','运输方式',['',...transportModes]],['product','产品 / 规格','text'],['customer','客户','text'],['quoteCountry','报价国家 / 地区',['']],['creditMonths','账期（月）','number'],['creditPayment','信保付款方式',['','L/C','D/P','D/A 或 O/A']],['qty','数量 kg','number'],['sell','对客单价 USD/kg','number'],['customerTerm','Incoterm',['待确认','EXW','FCA','FOB','CFR','CIF','其他']],['place','交货地点 / 港口','text'],['etd','ETD（预计开船日）','text']];
 const costs=[['buy','工厂采购单价','number'],['fx','买汇 / 成本汇率 RMB/USD','number'],['receive','收汇汇率 RMB/USD','number'],['sea','国际运费 USD/票','number'],['local','国内费用总额 RMB/票','number'],['tax','增值税率 %','number'],['rebate','退税率 %','number']];
 const params=[['transport','运输保险费率 %','number'],['credit','信用保险费率 %','number'],['interest','年资金利率 %','number'],['months','资金占用月数','number']];
 const factoryFields=[['cas','CAS 号','text'],['quoteDate','报价日期','date'],['name','产品','text'],['purity','含量 / 纯度','text'],['quality','其他关键质量指标','text'],['hazard','货物危险性','text'],['factory','工厂','text'],['details','报价明细','text'],['quantity','数量','text'],['validity','报价有效期','date'],['price','报价单价','number'],['currency','币种',['USD','RMB']],['tax','增值税率 %','number'],['rebate','退税率 %（不退税填 0）','number'],['unit','计价单位',['待确认','吨','公斤']],['incoterm','Incoterm',['待确认','EXW','FCA','FOB','CFR','CIF','其他']],['port','交货地点','text'],['loading','装柜量 / 柜型','text'],['packing','包装方式','text'],['delivery','交货期（含年份）','text'],['warehouse','进仓费承担方',['我方','工厂']],['portfee','港杂费承担方',['我方','工厂']]];
@@ -10,7 +10,7 @@ const freightContainerTypes=['20GP','40GP','40HQ','45HQ'];
 const freightUnits=['公斤','吨','CBM','票'];
 const freightBulkyOptions=['否','是'];
 const freightFields=[['agent','货代名称','text'],['origin','起运地','text'],['destination','目的地','text'],['transportMode','运输方式',['海运整柜','海运拼箱','空运']],['containerType','柜型',freightContainerTypes],['quantity','询价数量','number'],['quantityUnit','询价单位',freightUnits],['bulky','是否抛货',freightBulkyOptions],['volume','体积（CBM）','number'],['valid','有效期','date'],['sea','国际运费 USD/票','number'],['local','国内费用 RMB/票','number']];
-const defaults={product:'',cas:'',customer:'',qty:null,sell:null,customerTerm:'待确认',place:'',buy:null,fx:6.75,receive:6.75,sea:null,local:null,tax:13,rebate:null,transport:.03,credit:null,interest:3.6,months:3};
+const defaults={product:'',cas:'',customer:'',qty:null,sell:null,customerTerm:'待确认',place:'',etd:'',buy:null,fx:6.75,receive:6.75,sea:null,local:null,tax:13,rebate:null,transport:.03,credit:null,interest:3.6,months:3};
 function validRebate(rate){return Number.isFinite(rate)&&rate>=0&&rate<=100;}
 function fcaCost(v){return (v.buy-v.buy/(1+v.tax/100)*(v.rebate/100))/v.fx;}
 function calculate(v,m){const revenue=v.qty*v.sell,insurance=revenue*1.1*v.transport/100,credit=revenue*v.credit/100,interest=revenue*v.interest/100/12*v.months;if(m==='own'){const rate=v.receive,unit=v.sell-(insurance+credit+interest+v.sea+v.local/rate)/v.qty;return{unit,rmb:unit*(1+v.tax/100)/(1+(v.tax-v.rebate)/100)*rate,insurance,credit,interest}}const base=m==='rmb'?fcaCost(v):v.buy+v.local/v.fx/v.qty;const landed=base+v.sea/v.qty+(m==='rmb'?v.local/v.fx/v.qty:0);const profit=revenue-insurance-credit-interest-landed*v.qty;return{base,landed,profit,margin:base?v.qty?profit/(base*v.qty):0:0,rmb:revenue*v.receive-(insurance+credit+interest)*v.fx-landed*v.fx*v.qty,insurance,credit,interest}}
@@ -36,10 +36,16 @@ const creditNames = {
  907:'萨巴',908:'圣马丁岛',909:'盖比群岛',910:'社会群岛',911:'土阿莫土群岛',912:'马恩岛',913:'诺曼底群岛'
 };
 const creditRegions = new Intl.DisplayNames(["zh-CN"], {type:"region"});
+const creditRegionsEn = new Intl.DisplayNames(["en"], {type:"region"});
 const creditCodes = {"MMR":"MM","SAU":"SA","SVN":"SI","TLS":"TL","AUT":"AT","CYM":"KY","MYT":"YT","KWT":"KW","BDI":"BI","URY":"UY","QAT":"QA","CHN":"CN","MKD":"MK","KEN":"KE","DJI":"DJ","PSE":"PS","JEY":"JE","HUN":"HU","SGP":"SG","KOR":"KR","COD":"CD","GEO":"GE","LSO":"LS","ASM":"AS","PAK":"PK","DNK":"DK","ITA":"IT","ROU":"RO","GLP":"GP","FLK":"FK","JOR":"JO","UGA":"UG","LBY":"LY","LVA":"LV","BGD":"BD","TCA":"TC","NRU":"NR","KHM":"KH","KIR":"KI","GRD":"GD","DZA":"DZ","MNE":"ME","MDV":"MV","SDN":"SD","SOM":"SO","FRO":"FO","COK":"CK","HRV":"HR","TWN":"TW","MNP":"MP","GRL":"GL","FIN":"FI","MSR":"MS","UZB":"UZ","JAM":"JM","CPV":"CV","JPN":"JP","LTU":"LT","":"001","NGA":"NG","AIA":"AI","USA":"US","CAF":"CF","SEN":"SN","BHR":"BH","AFG":"AF","ARM":"AM","GMB":"GM","LBN":"LB","SXM":"SX","TJK":"TJ","SLE":"SL","PLW":"PW","LCA":"LC","TUN":"TN","DMA":"DM","PRI":"PR","PRY":"PY","NLD":"NL","TKL":"TK","NER":"NE","CUB":"CU","AND":"AD","RWA":"RW","ERI":"ER","PRT":"PT","ZMB":"ZM","GNQ":"GQ","HTI":"HT","HND":"HN","CMR":"CM","GTM":"GT","COG":"CG","BEL":"BE","PER":"PE","BEN":"BJ","TCD":"TD","CCK":"CC","BES":"BQ","SJM":"SJ","SHN":"SH","ARG":"AR","BLM":"BL","NFK":"NF","CHL":"CL","NIC":"NI","ALA":"AX","EST":"EE","SLB":"SB","MTQ":"MQ","REU":"RE","NPL":"NP","ECU":"EC","SWZ":"SZ","VGB":"VG","RUS":"RU","MHL":"MH","POL":"PL","OMN":"OM","MLT":"MT","IRL":"IE","MCO":"MC","FSM":"FM","MWI":"MW","IDN":"ID","GNB":"GW","MUS":"MU","DOM":"DO","ISL":"IS","TKM":"TM","GBR":"GB","MLI":"ML","CAN":"CA","CIV":"CI","TUR":"TR","IND":"IN","BRN":"BN","SWE":"SE","GUF":"GF","PNG":"PG","KAZ":"KZ","VUT":"VU","CXR":"CX","ATG":"AG","NOR":"NO","GIB":"GI","ALB":"AL","KGZ":"KG","IOT":"IO","BLZ":"BZ","SPM":"PM","SSD":"SS","AGO":"AO","LIE":"LI","NCL":"NC","HKG":"HK","KNA":"KN","IRQ":"IQ","ZAF":"ZA","CUW":"CW","GUY":"GY","MAC":"MO","UMI":"UM","LKA":"LK","THA":"TH","BLR":"BY","ETH":"ET","MAF":"MF","SUR":"SR","VIR":"VI","ARE":"AE","LUX":"LU","EGY":"EG","CHE":"CH","BGR":"BG","AUS":"AU","GUM":"GU","YEM":"YE","MRT":"MR","PAN":"PA","MEX":"MX","SVK":"SK","NZL":"NZ","ABW":"AW","PCN":"PN","WSM":"WS","TON":"TO","MDA":"MD","BHS":"BS","MNG":"MN","IMN":"IM","WLF":"WF","FRA":"FR","BFA":"BF","VNM":"VN","COM":"KM","CZE":"CZ","STP":"ST","VEN":"VE","PRK":"KP","NIU":"NU","COL":"CO","XKK":"XK","PHL":"PH","TTO":"TT","UKR":"UA","MDG":"MG","BRB":"BB","BOL":"BO","GRC":"GR","TGO":"TG","ESP":"ES","SYC":"SC","SYR":"SY","TZA":"TZ","AZE":"AZ","BRA":"BR","FJI":"FJ","SMR":"SM","LAO":"LA","ZWE":"ZW","CYP":"CY","BWA":"BW","BIH":"BA","VAT":"VA","DEU":"DE","TUV":"TV","GAB":"GA","PYF":"PF","GIN":"GN","SLV":"SV","MAR":"MA","GHA":"GH","MOZ":"MZ","BMU":"BM","VCT":"VC","ESH":"EH","LBR":"LR","GGY":"GG","IRN":"IR","NAM":"NA","SRB":"RS","MYS":"MY","CRI":"CR","ISR":"IL","BTN":"BT"};
-const creditCountries = Object.entries(creditGroups).flatMap(([group,codes])=>codes.split(' ').map(code=>({
- code, group, label: creditNames[code] || (creditCodes[code] ? creditRegions.of(creditCodes[code]) : code)
-}))).sort((a,b)=>a.label.localeCompare(b.label,'zh-CN'));
+const creditCountries = Object.entries(creditGroups).flatMap(([group,codes])=>codes.split(' ').map(code=>{
+  const iso2 = creditCodes[code] || '';
+  return {
+    code, iso2, group,
+    label: creditNames[code] || (iso2 ? creditRegions.of(iso2) : code),
+    english: iso2 ? creditRegionsEn.of(iso2) : '',
+  };
+})).sort((a,b)=>a.label.localeCompare(b.label,'zh-CN'));
 const creditPeriods = [[30,'0–30 天'],[60,'31–60 天'],[90,'61–90 天'],[180,'91–180 天'],[360,'181 天–1 年'],[720,'1–2 年']];
 const creditRates = {
  'L/C':[[.031,.041,.043,.169,.172],[.107,.113,.135,.530,.534],[.154,.189,.307,.717,.753],[.223,.257,.390,1,1.034],[.271,.325,.475,1.187,1.243],[.317,.393,.558,1.373,1.451]],
@@ -188,6 +194,8 @@ const positive = n => Number.isFinite(n) && n > 0;
 // 结构化文本只允许英文、数字和标点；工厂名称是中文字段的唯一例外。
 const chinesePattern = /[\u3000-\u303F\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/;
 const hasChinese = value => typeof value === 'string' && chinesePattern.test(value);
+/** ETD is free text restricted to printable ASCII (English letters, digits, spaces and punctuation). */
+const englishText = value => !/[^\x20-\x7E]/.test(String(value ?? ''));
 const text = s => typeof s === 'string' && s.trim().length > 0;
 const object = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const modes = ['rmb', 'usd', 'own'];
@@ -204,7 +212,8 @@ function factoryQuantityKg(value, unit) {
 /** C&F (CFR) unit cost only needs cost inputs, not selling price or credit terms. */
 function cfrCost(v, mode) {
   if (!object(v) || !['rmb', 'usd'].includes(mode) || !positive(v.qty) || !positive(v.fx)) return null;
-  if (![v.buy, v.sea, v.local].every(nonnegative)) return null;
+  if (![v.buy, v.local].every(nonnegative)) return null;
+  if (!(mode === 'usd' ? Number.isFinite(v.sea) : nonnegative(v.sea))) return null;
   if (mode === 'rmb' && (!nonnegative(v.tax) || !validRebate(v.rebate))) return null;
   const base = mode === 'rmb' ? fcaCost(v) : v.buy;
   return base + v.sea / v.qty + v.local / v.fx / v.qty;
@@ -215,7 +224,9 @@ function validateCalculation(v, mode) {
   if (!object(v) || !modes.includes(mode) || !positive(v.qty)) return false;
   if (mode === 'own' ? !positive(v.receive) : !positive(v.fx)) return false;
   if (mode === 'usd' && !positive(v.receive)) return false;
-  if (!['sell','sea','seaMax','local','transport','credit','interest','months'].every(k => nonnegative(v[k]))) return false;
+  if (!['sell','local','transport','credit','interest','months'].every(k => nonnegative(v[k]))) return false;
+  const validFreight = mode === 'usd' ? Number.isFinite : nonnegative;
+  if (!validFreight(v.sea) || !validFreight(v.seaMax)) return false;
   if (mode !== 'usd' && !nonnegative(v.tax)) return false;
   if (mode !== 'own' && !nonnegative(v.buy)) return false;
   if (v.seaMax < v.sea) return false;
@@ -277,6 +288,7 @@ function validateRecord(kind, r) {
       v.rebate ??= 0;
     } else v.seaMax ??= v.sea;
     if (!validateCalculation(v,r.mode)) throw new Error('核算记录中的数量、费用、汇率或退税率无效。');
+    if (v.etd != null && v.etd !== '' && !englishText(v.etd)) throw new Error('ETD 只能输入英文字符、数字和标点。');
     const keys = r.mode === 'own' ? ['unit','rmb','insurance','credit','interest'] : ['base','landed','profit','margin','rmb','insurance','credit','interest'];
     const resultOK = result => object(result) && keys.every(k => Number.isFinite(result[k]));
     if (!resultOK(r.result)) throw new Error('核算记录缺少有效计算结果。');
@@ -410,4 +422,4 @@ function parseQuotes(raw) {
       validity:normalizeFactoryDate(explicit.validity) || String(explicit.validity ?? '').trim()};
   });
 }
-export {normalizeCas,normalizeFactoryDate,localDateString,validityDuration,addValidityDate,factoryValidity,historyMatches,catalogProducts,basic,costs,params,factoryFields,productFields,freightFields,defaults,samples,transportModes,creditCountries,lookupCreditRate,calculate,fcaCost,cfrCost,factoryQuantityKg,validRebate,hasChinese,validateCalculation,parseQuotes,extractHazard,validateRecord,validateDatabase,averageFreights,freightRoute,freightBasis,freightContainerTypes,freightUnits,freightBulkyOptions};
+export {normalizeCas,normalizeFactoryDate,localDateString,validityDuration,addValidityDate,factoryValidity,historyMatches,catalogProducts,basic,costs,params,factoryFields,productFields,freightFields,defaults,samples,transportModes,creditCountries,lookupCreditRate,calculate,fcaCost,cfrCost,factoryQuantityKg,validRebate,hasChinese,englishText,validateCalculation,parseQuotes,extractHazard,validateRecord,validateDatabase,averageFreights,freightRoute,freightBasis,freightContainerTypes,freightUnits,freightBulkyOptions};

@@ -32,3 +32,6 @@ sourcing-*.md
 cb_hits*.json
 cb_scan*.py
 __pycache__/
+
+# Local business spreadsheets (factory quotes / calculation records)
+Sourcing Projects*.xlsx
