@@ -735,8 +735,11 @@ function createUI(React, ctx, t, css) {
         h('div', { className: 'qw-item-actions' }, button('删除', () => remove('freights', row))));
     }
     function historyRow(row) {
-      const a = row.result, values = historyValues(row);
-      const b = row.highFreightResult || (Number.isFinite(values.seaMax) && values.seaMax > values.sea ? calculate({ ...values, sea: values.seaMax }, row.mode) : a);
+      // 旧数据（如飞书同步早期拉下的记录）只有 values、没有 result，这里按 values 现算，避免渲染崩溃。
+      const values = historyValues(row);
+      const computed = row.result || calculate(values, row.mode);
+      const a = computed && typeof computed === 'object' ? computed : { unit: NaN, rmb: NaN, landed: NaN, profit: NaN, margin: NaN };
+      const b = row.highFreightResult || (Number.isFinite(values.seaMax) && values.seaMax > values.sea ? calculate({ ...values, sea: values.seaMax }, row.mode) : a) || a;
       const historyFactory = factoryForHistory(row);
       const factoryName = historyFactory?.factory || (row.mode === 'own' ? 'Own factory' : '未匹配工厂');
       return h('article', { key: row.id, className: 'qw-item' },
@@ -815,7 +818,11 @@ function createUI(React, ctx, t, css) {
     }
     function pageProducts() {
       const query = catalogSearch.trim().toLowerCase(), casQuery = normalizeCas(query);
-      const rows = products.filter(row => row.name.toLowerCase().includes(query) || (casQuery && normalizeCas(row.cas).includes(casQuery)));
+      // 旧数据里可能有不完整的目录记录（只有 id、没有 name/cas），渲染时跳过，避免 toLowerCase 崩溃。
+      const nameOf = row => String(row.name ?? ''), casOf = row => String(row.cas ?? '');
+      const rows = products
+        .filter(row => nameOf(row).trim() !== '' || casOf(row).trim() !== '')
+        .filter(row => nameOf(row).toLowerCase().includes(query) || (casQuery && normalizeCas(casOf(row)).includes(casQuery)));
       return h('div', { className: 'qw-body qw-factory' },
         h('section', { className: 'qw-card qw-form' },
           h('div', { className: 'qw-card-head' }, h('h2', null, t(productEditing ? '编辑产品' : '新增产品'))),
