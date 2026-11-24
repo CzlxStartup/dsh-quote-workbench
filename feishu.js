@@ -124,8 +124,15 @@ function decodeField(type, value) {
   if (type === 'number') return Number.isFinite(value) ? value : undefined;
   if (type === 'date') {
     if (typeof value === 'number' && Number.isFinite(value)) return new Date(value).toISOString().slice(0, 10);
-    const text = typeof value === 'string' ? value : String(value?.text ?? '');
+    const raw = Array.isArray(value) ? value.map(segment => (segment && typeof segment.text === 'string' ? segment.text : '')).join('') : value;
+    const text = typeof raw === 'string' ? raw : String(raw?.text ?? '');
     return /^\d{4}-\d{2}-\d{2}/.test(text) ? text.slice(0, 10) : undefined;
+  }
+  // 飞书文本字段实际返回富文本片段数组 [{ text, type:'text' }, { text, type:'mention' }, ...]，
+  // 而不是纯字符串。按片段拼接出纯文本；也兼容旧版/纯字符串或单对象 { text }。
+  if (Array.isArray(value)) {
+    const text = value.map(segment => (segment && typeof segment.text === 'string' ? segment.text : '')).join('');
+    return text ? text : undefined;
   }
   const text = typeof value === 'string' ? value : value?.text;
   return typeof text === 'string' && text ? text : undefined;

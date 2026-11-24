@@ -136,6 +136,42 @@ test('pull inserts new remote rows and queues local-only rows for push', async (
   assert.ok(ctx.pending.get('factories').has('local-only'), '本地独有记录进入待推送');
 });
 
+// —— 飞书文本字段实际返回富文本片段数组 [{text,type}]，pull 应正确拼出纯文本 ——
+test('pull decodes Feishu rich-text array fields into plain strings', async () => {
+  const initial = { revision: 1, factories: [], freights: [], history: [], products: [], settings: null };
+  const { ctx, db } = makeCtx(initial);
+  const config = makeConfig({ enable: true, appToken: 'bascnAPP', table_factories: 't1', table_freights: 't2', table_history: 't3', table_products: 't4' });
+  const sync = new FeishuSync(ctx, config);
+  sync.userAccessTokenValue = 'tok'; sync.userAccessTokenExpire = Date.now() + 1e9;
+
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (url.includes('/records/search')) {
+      if (url.includes('/tables/t4/')) {
+        // products 表：文本字段以 [{text,type}] 数组返回，数字以纯值返回。
+        return { ok: true, json: async () => ({ code: 0, data: { items: [{ record_id: 'prod-1', fields: {
+          '产品名称': [{ text: 'Bronopol', type: 'text' }],
+          'CAS 号': [{ text: '52-51-7', type: 'text' }],
+          '货物危险性': [{ text: 'Class 4.1 UN3241', type: 'text' }],
+          '增值税率 %': 13, '退税率 %': 13,
+        } }] } }) };
+      }
+      return { ok: true, json: async () => ({ code: 0, data: { items: [] } }) };
+    }
+    throw Error('unexpected url ' + url);
+  };
+  try {
+    await sync.pull();
+  } finally { globalThis.fetch = realFetch; }
+
+  const product = db().products.find(row => row.id === 'prod-1');
+  assert.ok(product, '产品记录已落地');
+  assert.equal(product.name, 'Bronopol', '富文本数组应拼成产品名称');
+  assert.equal(product.cas, '52-51-7', '富文本数组应拼成 CAS');
+  assert.equal(product.hazard, 'Class 4.1 UN3241');
+  assert.equal(product.tax, 13);
+});
+
 // —— pushLoop：新建成功把本地 id 回写成 record_id ——
 test('pushLoop writes back record_id for newly created rows', async () => {
   const initial = { revision: 1, factories: [{ id: 'local1', cas: '50-00-0', quoteDate: '2026-11-23', price: 14000 }], freights: [], history: [], products: [], settings: null };
