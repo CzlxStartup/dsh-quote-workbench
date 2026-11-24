@@ -2,7 +2,6 @@ import { z } from 'zod';
 import schema from '@deepseek-ai/schemastery';
 import { QuoteWorkbench } from './service.js';
 import { FeishuSync } from './feishu.js';
-import { validateDatabase } from './domain.js';
 
 export const inject = ['storageDomain', 'connection', 'tools', 'llm', 'credentials'];
 
@@ -19,6 +18,11 @@ export const Config = schema.object({
 });
 
 export async function apply(ctx, config) {
+  // 仅校验存储的“形状”（顶层字段与类型），不在此处对每条业务记录做严格校验。
+  // 原因：storageDomain.open 会在插件启动时用此 schema 校验已持久化的数据；若历史数据里存在
+  // 不完整或旧版本的记录（例如飞书同步早期从文字列为空的 Bitable 拉下的记录），严格校验会让
+  // 整个插件无法激活（表现为面板空白）。改为启动时宽容兼容：已有数据总能加载，用户仍可在界面里
+  // 查看/修复/导出。新增与导入仍由 service.js 的 validateRecord / validateDatabase 严格校验。
   const dbSchema = z.object({
     revision: z.number().int().nonnegative(),
     factories: z.array(z.record(z.string(), z.unknown())),
@@ -26,8 +30,6 @@ export async function apply(ctx, config) {
     history: z.array(z.record(z.string(), z.unknown())),
     products: z.array(z.record(z.string(), z.unknown())).default([]),
     settings: z.object({ provider: z.string().min(1), model: z.string().min(1) }).nullable().default(null),
-  }).superRefine((value, context) => {
-    try { validateDatabase(value); } catch (error) { context.addIssue({ code: 'custom', message: error.message }); }
   });
   const domain = await ctx.storageDomain.open({
     name: 'quote_workbench', version: 1, tables: {},
